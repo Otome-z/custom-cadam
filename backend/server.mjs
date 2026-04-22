@@ -4,6 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadLocalEnv } from './loadEnv.mjs';
 import { SYSTEM_PROMPT } from './prompt.mjs';
+import {
+  MODEL_SPEC_SYSTEM_PROMPT,
+  normalizeCatalogModel,
+  buildOpenScadFromModelSpec,
+} from './modelCatalog.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,6 +143,36 @@ function extractMessageText (content) {
   return '';
 }
 
+function extractJsonPayload (rawText) {
+  const trimmed = rawText.trim();
+  const candidates = [trimmed];
+
+  const exactBlock = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  if (exactBlock) {
+    candidates.push(exactBlock[1].trim());
+  }
+
+  const codeBlock = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/i);
+  if (codeBlock) {
+    candidates.push(codeBlock[1].trim());
+  }
+
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    candidates.push(objectMatch[0]);
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function readRequestBody (req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -161,7 +196,7 @@ function readRequestBody (req) {
   });
 }
 
-async function generateOpenScad (prompt) {
+async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.2 }) {
   if (!OPENROUTER_API_KEY) {
     throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
   }
@@ -175,21 +210,14 @@ async function generateOpenScad (prompt) {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'HTTP-Referer': OPENROUTER_SITE_URL,
+      'X-Title': OPENROUTER_APP_NAME,
     },
     body: JSON.stringify({
       model: OPENROUTER_MODEL,
-      max_tokens: 4000,
-      temperature: 0.2,
-      messages: [
-        {
-          role: 'system',
-          content: SYSTEM_PROMPT,
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
+      max_tokens: maxTokens,
+      temperature,
+      messages,
     }),
   });
 
@@ -198,10 +226,61 @@ async function generateOpenScad (prompt) {
     throw new Error(`DashScope request failed: ${response.status} ${errText}`);
   }
 
-  const data = await response.json();
-  console.log('data', data);
-  console.log('data', data.choices[0]?.message);
-  console.log('data', data.choices[0]?.message?.[0]);
+  return response.json();
+}
+
+async function inferCatalogModel (prompt) {
+  try {
+    const data = await requestOpenRouter({
+      maxTokens: 1200,
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'system',
+          content: MODEL_SPEC_SYSTEM_PROMPT,
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    });
+
+    const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
+    const payload = extractJsonPayload(rawText);
+    return normalizeCatalogModel(payload);
+  } catch (error) {
+    console.warn('[sub-cadam] Catalog inference failed:', error);
+    return null;
+  }
+}
+
+async function generateOpenScad (prompt) {
+  const catalogModelSpec = await inferCatalogModel(prompt);
+  if (catalogModelSpec) {
+    const code = buildOpenScadFromModelSpec(catalogModelSpec);
+    if (code) {
+      return {
+        code,
+        modelSpec: catalogModelSpec,
+      };
+    }
+  }
+
+  const data = await requestOpenRouter({
+    maxTokens: 4000,
+    temperature: 0.2,
+    messages: [
+      {
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      },
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ],
+  });
 
   const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
   const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(rawText));
@@ -210,7 +289,10 @@ async function generateOpenScad (prompt) {
     throw new Error('OpenRouter returned an empty response.');
   }
 
-  return code;
+  return {
+    code,
+    modelSpec: null,
+  };
 }
 
 function safeResolvePublicPath (urlPath) {
@@ -287,8 +369,12 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        const code = await generateOpenScad(prompt);
-        sendJson(res, 200, { prompt, code });
+        const result = await generateOpenScad(prompt);
+        sendJson(res, 200, {
+          prompt,
+          code: result.code,
+          modelSpec: result.modelSpec,
+        });
       } catch (error) {
         console.error('Generate API failed:', error);
         sendJson(res, 500, {

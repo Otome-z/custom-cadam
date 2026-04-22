@@ -19,7 +19,7 @@
             v-model="prompt"
             class="prompt-input"
             rows="8"
-            placeholder="例如：生成一个带把手的参数化马克杯，杯壁厚度 3mm，杯高 95mm。"
+            placeholder="例如：生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。"
           />
 
           <div class="actions">
@@ -173,7 +173,7 @@ import { parseParameters } from '@/utils/parseParameters';
 import type { GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
-  '生成一个参数化马克杯，带把手，杯高 95mm，外半径 42mm，壁厚 3mm，杯底厚 4mm。',
+  '生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);

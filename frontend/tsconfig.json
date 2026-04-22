@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "jsx": "preserve",
+    "noEmit": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
@@ -17,4 +18,3 @@
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "vite.config.ts"]
 }
-

@@ -65,6 +65,49 @@ function normalizeGeneratedCode (rawText) {
   return trimmed;
 }
 
+function ensureCurveResolutionDefaults (code) {
+  if (!code.trim()) {
+    return code;
+  }
+
+  let nextCode = code
+    .replace(
+      /(^|\n)([ \t]*)\$fn\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
+      (_match, prefix, indent, rawValue) =>
+        `${prefix}${indent}$fn = ${Math.max(Number(rawValue), 96)};`,
+    )
+    .replace(
+      /(^|\n)([ \t]*)\$fa\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
+      (_match, prefix, indent, rawValue) =>
+        `${prefix}${indent}$fa = ${Math.min(Number(rawValue), 3)};`,
+    )
+    .replace(
+      /(^|\n)([ \t]*)\$fs\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
+      (_match, prefix, indent, rawValue) =>
+        `${prefix}${indent}$fs = ${Math.min(Number(rawValue), 0.4)};`,
+    );
+
+  const preamble = [];
+
+  if (!/(^|\n)\s*\$fn\s*=/.test(nextCode)) {
+    preamble.push('$fn = 96;');
+  }
+
+  if (!/(^|\n)\s*\$fa\s*=/.test(nextCode)) {
+    preamble.push('$fa = 3;');
+  }
+
+  if (!/(^|\n)\s*\$fs\s*=/.test(nextCode)) {
+    preamble.push('$fs = 0.4;');
+  }
+
+  if (!preamble.length) {
+    return nextCode;
+  }
+
+  return `${preamble.join('\n')}\n\n${nextCode}`;
+}
+
 function extractMessageText (content) {
   if (typeof content === 'string') {
     return content;
@@ -161,7 +204,7 @@ async function generateOpenScad (prompt) {
   console.log('data', data.choices[0]?.message?.[0]);
 
   const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
-  const code = normalizeGeneratedCode(rawText);
+  const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(rawText));
 
   if (!code) {
     throw new Error('OpenRouter returned an empty response.');

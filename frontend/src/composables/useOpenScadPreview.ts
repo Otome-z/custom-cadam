@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import type { BufferGeometry } from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Parameter } from '@/types';
 import {
   WorkerMessageType,
@@ -45,7 +46,10 @@ export function useOpenScadPreview(
       return;
     }
 
-    const blob = new Blob([data.output], { type: 'model/stl' });
+    const outputBytes = new Uint8Array(data.output.byteLength);
+    outputBytes.set(data.output);
+
+    const blob = new Blob([outputBytes.buffer], { type: 'model/stl' });
     output.value = blob;
     error.value = null;
 
@@ -55,9 +59,13 @@ export function useOpenScadPreview(
       }
 
       const loader = new STLLoader();
-      const nextGeometry = loader.parse(buffer);
+      const parsedGeometry = loader.parse(buffer);
+      const nextGeometry = mergeVertices(parsedGeometry);
+      parsedGeometry.dispose();
+
       nextGeometry.center();
       nextGeometry.computeVertexNormals();
+      nextGeometry.normalizeNormals();
 
       geometry.value?.dispose();
       geometry.value = nextGeometry;

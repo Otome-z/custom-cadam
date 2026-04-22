@@ -58,6 +58,9 @@
         <p v-else-if="lastPrompt" class="status">
           最近一次请求：{{ lastPrompt }}
         </p>
+        <p v-if="lastModelFamily" class="status">
+          规范模型：{{ lastModelFamily }}<span v-if="lastModelSummary">（{{ lastModelSummary }}）</span>
+        </p>
 
         <section v-if="editableParameters.length" class="subpanel">
           <div class="subpanel-header">
@@ -181,6 +184,8 @@ const isGenerating = ref(false);
 const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
+const lastModelFamily = ref('');
+const lastModelSummary = ref('');
 const downloadUrl = ref<string | null>(null);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
@@ -258,6 +263,9 @@ async function generateModel() {
 
     code.value = payload.code;
     lastPrompt.value = payload.prompt;
+    lastModelFamily.value =
+      payload.modelSpec?.displayName || payload.modelSpec?.modelType || 'unknown';
+    lastModelSummary.value = payload.modelSpec?.summary || '';
   } catch (error) {
     requestError.value =
       error instanceof Error ? error.message : '生成请求失败。';

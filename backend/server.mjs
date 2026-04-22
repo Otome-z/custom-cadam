@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadLocalEnv } from './loadEnv.mjs';
-import { SYSTEM_PROMPT } from './prompt.mjs';
 import {
   MODEL_SPEC_SYSTEM_PROMPT,
   normalizeCatalogModel,
+  fallbackCatalogModel,
   buildOpenScadFromModelSpec,
 } from './modelCatalog.mjs';
 
@@ -53,64 +53,6 @@ function sendText (res, statusCode, message) {
     'Cache-Control': 'no-store',
   });
   res.end(message);
-}
-
-function normalizeGeneratedCode (rawText) {
-  const trimmed = rawText.trim();
-  const exactBlock = trimmed.match(/^```(?:openscad)?\s*\n?([\s\S]*?)\n?```$/i);
-  if (exactBlock) {
-    return exactBlock[1].trim();
-  }
-
-  const codeBlock = trimmed.match(/```(?:openscad)?\s*\n?([\s\S]*?)\n?```/i);
-  if (codeBlock) {
-    return codeBlock[1].trim();
-  }
-
-  return trimmed;
-}
-
-function ensureCurveResolutionDefaults (code) {
-  if (!code.trim()) {
-    return code;
-  }
-
-  let nextCode = code
-    .replace(
-      /(^|\n)([ \t]*)\$fn\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
-      (_match, prefix, indent, rawValue) =>
-        `${prefix}${indent}$fn = ${Math.max(Number(rawValue), 96)};`,
-    )
-    .replace(
-      /(^|\n)([ \t]*)\$fa\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
-      (_match, prefix, indent, rawValue) =>
-        `${prefix}${indent}$fa = ${Math.min(Number(rawValue), 3)};`,
-    )
-    .replace(
-      /(^|\n)([ \t]*)\$fs\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
-      (_match, prefix, indent, rawValue) =>
-        `${prefix}${indent}$fs = ${Math.min(Number(rawValue), 0.4)};`,
-    );
-
-  const preamble = [];
-
-  if (!/(^|\n)\s*\$fn\s*=/.test(nextCode)) {
-    preamble.push('$fn = 96;');
-  }
-
-  if (!/(^|\n)\s*\$fa\s*=/.test(nextCode)) {
-    preamble.push('$fa = 3;');
-  }
-
-  if (!/(^|\n)\s*\$fs\s*=/.test(nextCode)) {
-    preamble.push('$fs = 0.4;');
-  }
-
-  if (!preamble.length) {
-    return nextCode;
-  }
-
-  return `${preamble.join('\n')}\n\n${nextCode}`;
 }
 
 function extractMessageText (content) {
@@ -257,41 +199,16 @@ async function inferCatalogModel (prompt) {
 
 async function generateOpenScad (prompt) {
   const catalogModelSpec = await inferCatalogModel(prompt);
-  if (catalogModelSpec) {
-    const code = buildOpenScadFromModelSpec(catalogModelSpec);
-    if (code) {
-      return {
-        code,
-        modelSpec: catalogModelSpec,
-      };
-    }
-  }
-
-  const data = await requestOpenRouter({
-    maxTokens: 4000,
-    temperature: 0.2,
-    messages: [
-      {
-        role: 'system',
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-  });
-
-  const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
-  const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(rawText));
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
+  const code = buildOpenScadFromModelSpec(modelSpec);
 
   if (!code) {
-    throw new Error('OpenRouter returned an empty response.');
+    throw new Error('Failed to build OpenSCAD from catalog model spec.');
   }
 
   return {
     code,
-    modelSpec: null,
+    modelSpec,
   };
 }
 

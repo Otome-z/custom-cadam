@@ -51,12 +51,23 @@
             >
               下载 STL
             </a>
+            <label v-if="geometry" class="checkbox-row">
+              <input
+                type="checkbox"
+                :checked="compareMode"
+                @change="compareMode = ($event.target as HTMLInputElement).checked"
+              />
+              <span>对照模式</span>
+            </label>
           </div>
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
         <p v-else-if="lastPrompt" class="status">
           最近一次请求：{{ lastPrompt }}
+        </p>
+        <p v-if="lastModelFamily" class="status">
+          规范模型：{{ lastModelFamily }}<span v-if="lastModelSummary">（{{ lastModelSummary }}）</span>
         </p>
 
         <section v-if="editableParameters.length" class="subpanel">
@@ -155,6 +166,8 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
+          :compare-enabled="compareMode"
+          :compare-spec="compareSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
@@ -173,7 +186,7 @@ import { parseParameters } from '@/utils/parseParameters';
 import type { GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
-  '生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。',
+  '生成一个参数化纱线面，由 1 根圆柱形纱线并排组成，单根直径 40mm，长度 120mm。',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);
@@ -181,7 +194,10 @@ const isGenerating = ref(false);
 const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
+const lastModelFamily = ref('');
+const lastModelSummary = ref('');
 const downloadUrl = ref<string | null>(null);
+const compareMode = ref(true);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -203,6 +219,23 @@ const readonlyParameters = computed(() =>
 const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
+const compareSpec = computed(() => {
+  const diameter = getNumberParam('strand_diameter') ?? 40;
+  const height =
+    getNumberParam('strand_length')
+    ?? getNumberParam('braid_length')
+    ?? 120;
+  const radialSegments = getNumberParam('radial_segments');
+  if (!radialSegments) {
+    return null;
+  }
+
+  return {
+    radius: Math.max(0.1, diameter / 2),
+    height: Math.max(0.1, height),
+    radialSegments: Math.max(3, Math.round(radialSegments)),
+  };
+});
 
 const downloadFilename = computed(() => {
   const slug = (lastPrompt.value || 'sub-cadam-model')
@@ -258,6 +291,9 @@ async function generateModel() {
 
     code.value = payload.code;
     lastPrompt.value = payload.prompt;
+    lastModelFamily.value =
+      payload.modelSpec?.displayName || payload.modelSpec?.modelType || 'unknown';
+    lastModelSummary.value = payload.modelSpec?.summary || '';
   } catch (error) {
     requestError.value =
       error instanceof Error ? error.message : '生成请求失败。';
@@ -302,6 +338,11 @@ function setStringParameter(parameterName: string, event: Event) {
 function setBooleanParameter(parameterName: string, event: Event) {
   const target = event.target as HTMLInputElement;
   updateParameterValue(parameterName, target.checked);
+}
+
+function getNumberParam(name: string) {
+  const target = parameters.value.find((parameter) => parameter.name === name);
+  return target && typeof target.value === 'number' ? target.value : null;
 }
 
 onBeforeUnmount(() => {

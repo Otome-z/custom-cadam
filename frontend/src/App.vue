@@ -51,6 +51,14 @@
             >
               下载 STL
             </a>
+            <label v-if="geometry" class="checkbox-row">
+              <input
+                type="checkbox"
+                :checked="compareMode"
+                @change="compareMode = ($event.target as HTMLInputElement).checked"
+              />
+              <span>对照模式</span>
+            </label>
           </div>
         </form>
 
@@ -158,6 +166,8 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
+          :compare-enabled="compareMode"
+          :compare-spec="compareSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
@@ -187,6 +197,7 @@ const lastPrompt = ref('');
 const lastModelFamily = ref('');
 const lastModelSummary = ref('');
 const downloadUrl = ref<string | null>(null);
+const compareMode = ref(true);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -208,6 +219,24 @@ const readonlyParameters = computed(() =>
 const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
+const compareSpec = computed(() => {
+  const diameter = getNumberParam('strand_diameter');
+  const radialSegments = getNumberParam('radial_segments');
+  const length =
+    getNumberParam('strand_length')
+    ?? getNumberParam('braid_length')
+    ?? 120;
+
+  if (!diameter || !radialSegments) {
+    return null;
+  }
+
+  return {
+    radius: diameter / 2,
+    height: length,
+    radialSegments: Math.max(3, Math.round(radialSegments)),
+  };
+});
 
 const downloadFilename = computed(() => {
   const slug = (lastPrompt.value || 'sub-cadam-model')
@@ -310,6 +339,11 @@ function setStringParameter(parameterName: string, event: Event) {
 function setBooleanParameter(parameterName: string, event: Event) {
   const target = event.target as HTMLInputElement;
   updateParameterValue(parameterName, target.checked);
+}
+
+function getNumberParam(name: string) {
+  const target = parameters.value.find((parameter) => parameter.name === name);
+  return target && typeof target.value === 'number' ? target.value : null;
 }
 
 onBeforeUnmount(() => {

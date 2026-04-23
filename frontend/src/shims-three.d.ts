@@ -15,7 +15,8 @@ declare module 'three' {
   export class Mesh {
     constructor(geometry?: BufferGeometry, material?: Material);
     rotation: { x: number };
-    position: { y: number };
+    position: { x: number; y: number };
+    geometry: BufferGeometry;
     material: Material;
     castShadow: boolean;
     receiveShadow: boolean;
@@ -63,6 +64,15 @@ declare module 'three' {
 
   export class CircleGeometry extends BufferGeometry {
     constructor(radius?: number, segments?: number);
+  }
+
+  export class CylinderGeometry extends BufferGeometry {
+    constructor(
+      radiusTop?: number,
+      radiusBottom?: number,
+      height?: number,
+      radialSegments?: number,
+    );
   }
 
   export class MeshStandardMaterial extends Material {

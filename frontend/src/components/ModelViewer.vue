@@ -21,6 +21,11 @@
     <div v-else-if="!geometry" class="viewer-overlay viewer-overlay-idle">
       <span>Generate a model to preview it here.</span>
     </div>
+
+    <div v-if="geometry" class="viewer-metrics">
+      <span>{{ metricText.stl }}</span>
+      <span>{{ metricText.reference }}</span>
+    </div>
   </div>
 </template>
 
@@ -32,6 +37,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const props = defineProps<{
   geometry: BufferGeometry | null;
+  compareEnabled?: boolean;
+  compareSpec?: {
+    radius: number;
+    height: number;
+    radialSegments: number;
+  } | null;
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
@@ -48,8 +59,13 @@ let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
+let referenceMesh: Mesh | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
+const metricText = ref({
+  stl: 'STL: -',
+  reference: 'Cylinder: -',
+});
 
 function initScene() {
   if (!canvasHost.value) {
@@ -146,10 +162,23 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     (modelMesh.material as THREE.Material).dispose();
     modelMesh = null;
   }
+  if (referenceMesh) {
+    scene.remove(referenceMesh);
+    referenceMesh.geometry.dispose();
+    (referenceMesh.material as THREE.Material).dispose();
+    referenceMesh = null;
+  }
 
   if (!nextGeometry) {
+    metricText.value = {
+      stl: 'STL: -',
+      reference: 'Cylinder: -',
+    };
     return;
   }
+
+  const shouldCompare = Boolean(props.compareEnabled && props.compareSpec);
+  const compareOffset = shouldCompare ? 60 : 0;
 
   modelMesh = new THREE.Mesh(
     nextGeometry,
@@ -161,10 +190,54 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   );
 
   modelMesh.rotation.x = -Math.PI / 2;
+  modelMesh.position.x = shouldCompare ? -compareOffset : 0;
   modelMesh.castShadow = true;
   modelMesh.receiveShadow = true;
   scene.add(modelMesh);
+
+  if (shouldCompare && props.compareSpec) {
+    referenceMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        props.compareSpec.radius,
+        props.compareSpec.radius,
+        props.compareSpec.height,
+        props.compareSpec.radialSegments,
+      ),
+      new THREE.MeshStandardMaterial({
+        color: '#7a8e2c',
+        roughness: 0.24,
+        metalness: 0.04,
+      }),
+    );
+    referenceMesh.rotation.x = -Math.PI / 2;
+    referenceMesh.position.x = compareOffset;
+    referenceMesh.castShadow = true;
+    referenceMesh.receiveShadow = true;
+    scene.add(referenceMesh);
+  }
+
+  metricText.value = {
+    stl: buildStatsLabel('STL', modelMesh.geometry, 'recomputed'),
+    reference: referenceMesh
+      ? buildStatsLabel('Cylinder', referenceMesh.geometry, 'native')
+      : 'Cylinder: -',
+  };
+
   fitCameraToMesh();
+}
+
+function buildStatsLabel(label: string, geometry: BufferGeometry, normalMode: string) {
+  const geometryData = geometry as BufferGeometry & {
+    attributes?: { position?: { count?: number } };
+    index?: { count?: number } | null;
+  };
+
+  const vertexCount = geometryData.attributes?.position?.count ?? 0;
+  const triangleCount = geometryData.index
+    ? Math.floor((geometryData.index.count ?? 0) / 3)
+    : Math.floor(vertexCount / 3);
+
+  return `${label}: v=${vertexCount} / t=${triangleCount} / n=${normalMode}`;
 }
 
 function animate() {
@@ -189,12 +262,24 @@ watch(
   },
 );
 
+watch(
+  () => [props.compareEnabled, props.compareSpec] as const,
+  () => {
+    setGeometry(props.geometry);
+  },
+  { deep: true },
+);
+
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
   controls?.dispose();
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
+  }
+  if (referenceMesh) {
+    referenceMesh.geometry.dispose();
+    (referenceMesh.material as THREE.Material).dispose();
   }
   renderer?.dispose();
   renderer?.domElement.remove();
@@ -203,5 +288,24 @@ onBeforeUnmount(() => {
   camera = null;
   controls = null;
   modelMesh = null;
+  referenceMesh = null;
 });
 </script>
+
+<style scoped>
+.viewer-metrics {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #d9e6a8;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+</style>

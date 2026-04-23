@@ -2,8 +2,10 @@ declare module 'three' {
   export class BufferGeometry {
     center(): this;
     computeVertexNormals(): void;
+    computeBoundingBox(): void;
     normalizeNormals(): void;
     dispose(): void;
+    boundingBox: Box3 | null;
   }
 
   export class Material {
@@ -13,7 +15,8 @@ declare module 'three' {
   export class Mesh {
     constructor(geometry?: BufferGeometry, material?: Material);
     rotation: { x: number };
-    position: { y: number };
+    position: { x: number; y: number };
+    geometry: BufferGeometry;
     material: Material;
     castShadow: boolean;
     receiveShadow: boolean;
@@ -63,8 +66,33 @@ declare module 'three' {
     constructor(radius?: number, segments?: number);
   }
 
+  export class CylinderGeometry extends BufferGeometry {
+    constructor(
+      radiusTop?: number,
+      radiusBottom?: number,
+      height?: number,
+      radialSegments?: number,
+    );
+  }
+
   export class MeshStandardMaterial extends Material {
     constructor(parameters?: Record<string, unknown>);
+  }
+
+  export class MeshPhysicalMaterial extends Material {
+    constructor(parameters?: Record<string, unknown>);
+  }
+
+  export class CanvasTexture {
+    constructor(canvas: HTMLCanvasElement);
+    wrapS: unknown;
+    wrapT: unknown;
+    anisotropy: number;
+    colorSpace: unknown;
+    repeat: {
+      set(x: number, y: number): void;
+    };
+    dispose(): void;
   }
 
   export class Box3 {
@@ -82,6 +110,8 @@ declare module 'three' {
   }
 
   export const SRGBColorSpace: unknown;
+  export const NoColorSpace: unknown;
+  export const RepeatWrapping: unknown;
 }
 
 declare module 'three/examples/jsm/controls/OrbitControls.js' {

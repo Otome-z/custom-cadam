@@ -39,5 +39,9 @@ export type Parameter = {
 export type GenerateResponse = {
   prompt: string;
   code: string;
+  modelSpec?: {
+    modelType: string;
+    displayName?: string;
+    summary?: string;
+  } | null;
 };
-

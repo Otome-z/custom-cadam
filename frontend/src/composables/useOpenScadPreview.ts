@@ -60,9 +60,12 @@ export function useOpenScadPreview(
 
       const loader = new STLLoader();
       const parsedGeometry = loader.parse(buffer);
-      const nextGeometry = mergeVertices(parsedGeometry);
+      const weldTolerance = 1e-4;
+      const nextGeometry = mergeVertices(parsedGeometry, weldTolerance);
       parsedGeometry.dispose();
 
+      (nextGeometry as BufferGeometry & { deleteAttribute?: (name: string) => void })
+        .deleteAttribute?.('normal');
       nextGeometry.center();
       nextGeometry.computeVertexNormals();
       nextGeometry.normalizeNormals();

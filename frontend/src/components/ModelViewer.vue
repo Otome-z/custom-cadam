@@ -209,7 +209,6 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
         metalness: 0.04,
       }),
     );
-    referenceMesh.rotation.x = -Math.PI / 2;
     referenceMesh.position.x = compareOffset;
     referenceMesh.castShadow = true;
     referenceMesh.receiveShadow = true;

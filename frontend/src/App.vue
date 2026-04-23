@@ -220,14 +220,19 @@ const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
 const compareSpec = computed(() => {
+  const diameter = getNumberParam('strand_diameter') ?? 40;
+  const height =
+    getNumberParam('strand_length')
+    ?? getNumberParam('braid_length')
+    ?? 120;
   const radialSegments = getNumberParam('radial_segments');
   if (!radialSegments) {
     return null;
   }
 
   return {
-    radius: 20,
-    height: 120,
+    radius: Math.max(0.1, diameter / 2),
+    height: Math.max(0.1, height),
     radialSegments: Math.max(3, Math.round(radialSegments)),
   };
 });

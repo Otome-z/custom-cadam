@@ -60,7 +60,7 @@ export function useOpenScadPreview(
 
       const loader = new STLLoader();
       const parsedGeometry = loader.parse(buffer);
-      const nextGeometry = mergeVertices(parsedGeometry, 1e-2);
+      const nextGeometry = mergeVertices(parsedGeometry, 0.25);
       parsedGeometry.dispose();
 
       (nextGeometry as BufferGeometry & { deleteAttribute?: (name: string) => void })

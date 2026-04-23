@@ -50,82 +50,6 @@ let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
-let yarnColorMap: THREE.CanvasTexture | null = null;
-let yarnBumpMap: THREE.CanvasTexture | null = null;
-
-function createYarnTexture(kind: 'color' | 'bump') {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-
-  if (!context) {
-    return null;
-  }
-
-  if (kind === 'color') {
-    context.fillStyle = '#c9df66';
-    context.fillRect(0, 0, 256, 256);
-
-    for (let y = 0; y < 256; y += 4) {
-      const alpha = 0.08 + Math.random() * 0.08;
-      context.fillStyle = `rgba(235,255,180,${alpha.toFixed(3)})`;
-      context.fillRect(0, y, 256, 2);
-    }
-
-    for (let x = 0; x < 256; x += 6) {
-      const alpha = 0.04 + Math.random() * 0.06;
-      context.fillStyle = `rgba(110,130,40,${alpha.toFixed(3)})`;
-      context.fillRect(x, 0, 1, 256);
-    }
-  } else {
-    context.fillStyle = '#808080';
-    context.fillRect(0, 0, 256, 256);
-
-    for (let y = 0; y < 256; y += 4) {
-      const light = 120 + Math.floor(Math.random() * 80);
-      context.fillStyle = `rgb(${light},${light},${light})`;
-      context.fillRect(0, y, 256, 2);
-    }
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.anisotropy = 8;
-  texture.colorSpace = kind === 'color' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-  return texture;
-}
-
-function getYarnMaterial(size: THREE.Vector3) {
-  if (!yarnColorMap) {
-    yarnColorMap = createYarnTexture('color');
-  }
-
-  if (!yarnBumpMap) {
-    yarnBumpMap = createYarnTexture('bump');
-  }
-
-  const maxDim = Math.max(size.x, size.y, size.z, 1);
-  const repeat = Math.max(2, Math.round(maxDim / 12));
-
-  yarnColorMap?.repeat.set(repeat, repeat);
-  yarnBumpMap?.repeat.set(repeat * 1.6, repeat * 1.6);
-
-  return new THREE.MeshPhysicalMaterial({
-    color: '#cfdf6f',
-    map: yarnColorMap ?? undefined,
-    bumpMap: yarnBumpMap ?? undefined,
-    bumpScale: 0.35,
-    roughness: 0.92,
-    metalness: 0,
-    sheen: 0.6,
-    sheenColor: new THREE.Color('#eff8c8'),
-    sheenRoughness: 0.85,
-    clearcoat: 0.04,
-    clearcoatRoughness: 1,
-  });
-}
 
 function initScene() {
   if (!canvasHost.value) {
@@ -227,15 +151,13 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     return;
   }
 
-  nextGeometry.computeBoundingBox();
-  const bounds = nextGeometry.boundingBox;
-  const size = bounds
-    ? bounds.getSize(new THREE.Vector3())
-    : new THREE.Vector3(80, 80, 80);
-
   modelMesh = new THREE.Mesh(
     nextGeometry,
-    getYarnMaterial(size),
+    new THREE.MeshStandardMaterial({
+      color: '#7a8e2c',
+      roughness: 0.24,
+      metalness: 0.04,
+    }),
   );
 
   modelMesh.rotation.x = -Math.PI / 2;
@@ -274,8 +196,6 @@ onBeforeUnmount(() => {
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
   }
-  yarnColorMap?.dispose();
-  yarnBumpMap?.dispose();
   renderer?.dispose();
   renderer?.domElement.remove();
   renderer = null;
@@ -283,7 +203,5 @@ onBeforeUnmount(() => {
   camera = null;
   controls = null;
   modelMesh = null;
-  yarnColorMap = null;
-  yarnBumpMap = null;
 });
 </script>

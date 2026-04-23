@@ -158,6 +158,7 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
+          :compare-spec="compareSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
@@ -208,6 +209,41 @@ const readonlyParameters = computed(() =>
 const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
+
+
+const compareSpec = computed(() => {
+  const diameter =
+    getNumberParam('strand_diameter')
+    ?? getNumberParam('yarn_diameter')
+    ?? getNumberParam('diameter')
+    ?? getNumberParam('tube_diameter')
+    ?? ((getNumberParam('strand_radius')
+      ?? getNumberParam('yarn_radius')
+      ?? getNumberParam('radius')
+      ?? getNumberParam('tube_radius')
+      ?? 20) * 2);
+
+  const height =
+    getNumberParam('strand_length')
+    ?? getNumberParam('yarn_length')
+    ?? getNumberParam('length')
+    ?? getNumberParam('tube_length')
+    ?? getNumberParam('height')
+    ?? 120;
+
+  const radialSegments =
+    getNumberParam('radial_segments')
+    ?? getNumberParam('resolution')
+    ?? getNumberParam('segments')
+    ?? getNumberParam('$fn')
+    ?? 64;
+
+  return {
+    radius: Math.max(0.1, diameter / 2),
+    height: Math.max(0.1, height),
+    radialSegments: Math.max(48, Math.round(radialSegments)),
+  };
+});
 
 const downloadFilename = computed(() => {
   const slug = (lastPrompt.value || 'sub-cadam-model')
@@ -312,6 +348,12 @@ function setBooleanParameter(parameterName: string, event: Event) {
   updateParameterValue(parameterName, target.checked);
 }
 
+
+
+function getNumberParam(name: string) {
+  const target = parameters.value.find((parameter) => parameter.name === name);
+  return target && typeof target.value === 'number' ? target.value : null;
+}
 
 onBeforeUnmount(() => {
   if (downloadUrl.value) {

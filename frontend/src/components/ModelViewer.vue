@@ -178,7 +178,7 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   }
 
   const shouldCompare = Boolean(props.compareEnabled && props.compareSpec);
-  const compareOffset = shouldCompare ? 60 : 0;
+  const compareOffset = shouldCompare ? 34 : 0;
 
   modelMesh = new THREE.Mesh(
     nextGeometry,

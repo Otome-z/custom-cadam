@@ -186,7 +186,7 @@ import { parseParameters } from '@/utils/parseParameters';
 import type { GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
-  '生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。',
+  '生成一个参数化纱线面，由 1 根圆柱形纱线并排组成，单根直径 40mm，长度 120mm。',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);
@@ -220,20 +220,14 @@ const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
 const compareSpec = computed(() => {
-  const diameter = getNumberParam('strand_diameter');
   const radialSegments = getNumberParam('radial_segments');
-  const length =
-    getNumberParam('strand_length')
-    ?? getNumberParam('braid_length')
-    ?? 120;
-
-  if (!diameter || !radialSegments) {
+  if (!radialSegments) {
     return null;
   }
 
   return {
-    radius: diameter / 2,
-    height: length,
+    radius: 20,
+    height: 120,
     radialSegments: Math.max(3, Math.round(radialSegments)),
   };
 });

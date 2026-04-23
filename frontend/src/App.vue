@@ -51,11 +51,35 @@
             >
               下载 STL
             </a>
+            <div v-if="geometry" class="export-row">
+              <select
+                v-model="selectedExportFormat"
+                class="parameter-input export-select"
+                :disabled="isExporting"
+              >
+                <option
+                  v-for="format in exportFormats"
+                  :key="format.value"
+                  :value="format.value"
+                >
+                  {{ format.label }}
+                </option>
+              </select>
+              <button
+                class="ghost-button"
+                type="button"
+                :disabled="isExporting"
+                @click="exportCurrentGeometry"
+              >
+                {{ isExporting ? '导出中...' : '导出模型' }}
+              </button>
+            </div>
           </div>
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
-        <p v-else-if="lastPrompt" class="status">
+        <p v-if="exportError" class="status status-error">{{ exportError }}</p>
+        <p v-if="!requestError && !exportError && lastPrompt" class="status">
           最近一次请求：{{ lastPrompt }}
         </p>
         <p v-if="lastModelFamily" class="status">
@@ -174,6 +198,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
+import { exportPreviewGeometry, type ExportFormat } from '@/utils/exportGeometry';
 import type { GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
@@ -188,6 +213,9 @@ const lastPrompt = ref('');
 const lastModelFamily = ref('');
 const lastModelSummary = ref('');
 const downloadUrl = ref<string | null>(null);
+const isExporting = ref(false);
+const exportError = ref('');
+const selectedExportFormat = ref<ExportFormat>('obj');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -210,6 +238,17 @@ const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
 
+
+
+const exportFormats: Array<{ label: string; value: ExportFormat }> = [
+  { label: 'OBJ (.obj)', value: 'obj' },
+  { label: 'STL ASCII (.stl)', value: 'stl-ascii' },
+  { label: 'STL Binary (.stl)', value: 'stl-binary' },
+  { label: 'PLY ASCII (.ply)', value: 'ply-ascii' },
+  { label: 'PLY Binary (.ply)', value: 'ply-binary' },
+  { label: 'glTF JSON (.gltf)', value: 'gltf' },
+  { label: 'glTF Binary (.glb)', value: 'glb' },
+];
 
 const compareSpec = computed(() => {
   const diameter =
@@ -279,6 +318,7 @@ async function generateModel() {
 
   isGenerating.value = true;
   requestError.value = '';
+  exportError.value = '';
   copied.value = false;
 
   try {
@@ -349,6 +389,34 @@ function setBooleanParameter(parameterName: string, event: Event) {
 }
 
 
+
+
+async function exportCurrentGeometry() {
+  if (!geometry.value) {
+    exportError.value = '当前没有可导出的几何体。';
+    return;
+  }
+
+  isExporting.value = true;
+  exportError.value = '';
+
+  try {
+    const result = await exportPreviewGeometry(geometry.value, selectedExportFormat.value);
+    const baseName = downloadFilename.value.replace(/\.stl$/i, '');
+    const url = URL.createObjectURL(result.blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${baseName}.${result.extension}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    exportError.value = error instanceof Error ? error.message : '导出失败。';
+  } finally {
+    isExporting.value = false;
+  }
+}
 
 function getNumberParam(name: string) {
   const target = parameters.value.find((parameter) => parameter.name === name);

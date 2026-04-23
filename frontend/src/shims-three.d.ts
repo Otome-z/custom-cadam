@@ -167,3 +167,44 @@ declare module 'three/examples/jsm/utils/BufferGeometryUtils.js' {
     useGroups?: boolean,
   ): BufferGeometry | null;
 }
+
+declare module 'three/examples/jsm/exporters/STLExporter.js' {
+  import type { Mesh } from 'three';
+
+  export class STLExporter {
+    parse(mesh: Mesh, options?: { binary?: boolean }): string | ArrayBuffer;
+  }
+}
+
+declare module 'three/examples/jsm/exporters/OBJExporter.js' {
+  import type { Mesh } from 'three';
+
+  export class OBJExporter {
+    parse(mesh: Mesh): string;
+  }
+}
+
+declare module 'three/examples/jsm/exporters/PLYExporter.js' {
+  import type { Mesh } from 'three';
+
+  export class PLYExporter {
+    parse(
+      mesh: Mesh,
+      onDone: (result: string | ArrayBuffer) => void,
+      options?: { binary?: boolean },
+    ): void;
+  }
+}
+
+declare module 'three/examples/jsm/exporters/GLTFExporter.js' {
+  import type { Scene } from 'three';
+
+  export class GLTFExporter {
+    parse(
+      scene: Scene,
+      onDone: (result: object | ArrayBuffer) => void,
+      onError?: (error: unknown) => void,
+      options?: { binary?: boolean },
+    ): void;
+  }
+}

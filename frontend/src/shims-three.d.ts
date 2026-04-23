@@ -1,6 +1,8 @@
 declare module 'three' {
   export class BufferGeometry {
     center(): this;
+    rotateX(angle: number): this;
+    translate(x: number, y: number, z: number): this;
     computeVertexNormals(): void;
     computeBoundingBox(): void;
     normalizeNormals(): void;
@@ -72,6 +74,22 @@ declare module 'three' {
       radiusBottom?: number,
       height?: number,
       radialSegments?: number,
+      heightSegments?: number,
+      openEnded?: boolean,
+    );
+  }
+
+  export class CatmullRomCurve3 {
+    constructor(points?: Vector3[], closed?: boolean, curveType?: string, tension?: number);
+  }
+
+  export class TubeGeometry extends BufferGeometry {
+    constructor(
+      path: CatmullRomCurve3,
+      tubularSegments?: number,
+      radius?: number,
+      radialSegments?: number,
+      closed?: boolean,
     );
   }
 
@@ -143,4 +161,9 @@ declare module 'three/examples/jsm/utils/BufferGeometryUtils.js' {
     geometry: BufferGeometry,
     tolerance?: number,
   ): BufferGeometry;
+
+  export function mergeGeometries(
+    geometries: BufferGeometry[],
+    useGroups?: boolean,
+  ): BufferGeometry | null;
 }

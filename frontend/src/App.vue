@@ -9,7 +9,7 @@
         <h1>参数化文生模型最小闭环</h1>
         <p class="intro">
           这里保留一条最短链路：输入文案，后端请求 OpenRouter 生成
-          OpenSCAD，前端 worker 编译 STL，并在右侧直接预览。
+          OpenSCAD，前端直接构建 three.js 原生几何并在右侧预览。
         </p>
 
         <form class="prompt-form" @submit.prevent="generateModel">
@@ -51,14 +51,6 @@
             >
               下载 STL
             </a>
-            <label v-if="geometry" class="checkbox-row">
-              <input
-                type="checkbox"
-                :checked="compareMode"
-                @change="compareMode = ($event.target as HTMLInputElement).checked"
-              />
-              <span>对照模式</span>
-            </label>
           </div>
         </form>
 
@@ -154,7 +146,7 @@
         <div class="preview-header">
           <div>
             <div class="eyebrow">Preview</div>
-            <h2>Worker 编译结果</h2>
+            <h2>Native three.js preview</h2>
           </div>
           <div class="preview-state">
             <span :class="['state-pill', isCompiling ? 'state-busy' : 'state-idle']">
@@ -166,8 +158,6 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
-          :compare-enabled="compareMode"
-          :compare-spec="compareSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
@@ -197,7 +187,6 @@ const lastPrompt = ref('');
 const lastModelFamily = ref('');
 const lastModelSummary = ref('');
 const downloadUrl = ref<string | null>(null);
-const compareMode = ref(true);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -219,23 +208,6 @@ const readonlyParameters = computed(() =>
 const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
-const compareSpec = computed(() => {
-  const diameter = getNumberParam('strand_diameter') ?? 40;
-  const height =
-    getNumberParam('strand_length')
-    ?? getNumberParam('braid_length')
-    ?? 120;
-  const radialSegments = getNumberParam('radial_segments');
-  if (!radialSegments) {
-    return null;
-  }
-
-  return {
-    radius: Math.max(0.1, diameter / 2),
-    height: Math.max(0.1, height),
-    radialSegments: Math.max(3, Math.round(radialSegments)),
-  };
-});
 
 const downloadFilename = computed(() => {
   const slug = (lastPrompt.value || 'sub-cadam-model')
@@ -340,10 +312,6 @@ function setBooleanParameter(parameterName: string, event: Event) {
   updateParameterValue(parameterName, target.checked);
 }
 
-function getNumberParam(name: string) {
-  const target = parameters.value.find((parameter) => parameter.name === name);
-  return target && typeof target.value === 'number' ? target.value : null;
-}
 
 onBeforeUnmount(() => {
   if (downloadUrl.value) {

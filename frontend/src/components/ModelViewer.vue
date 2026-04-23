@@ -3,7 +3,7 @@
     <div ref="canvasHost" class="viewer-canvas"></div>
 
     <div v-if="loading" class="viewer-overlay">
-      <span>Compiling OpenSCAD preview...</span>
+      <span>Building native three.js preview...</span>
     </div>
     <div v-else-if="error" class="viewer-overlay viewer-overlay-error">
       <div class="viewer-error-card">
@@ -23,8 +23,7 @@
     </div>
 
     <div v-if="geometry" class="viewer-metrics">
-      <span>{{ metricText.stl }}</span>
-      <span>{{ metricText.reference }}</span>
+      <span>{{ metricText }}</span>
     </div>
   </div>
 </template>
@@ -37,12 +36,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const props = defineProps<{
   geometry: BufferGeometry | null;
-  compareEnabled?: boolean;
-  compareSpec?: {
-    radius: number;
-    height: number;
-    radialSegments: number;
-  } | null;
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
@@ -59,13 +52,9 @@ let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
-let referenceMesh: Mesh | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
-const metricText = ref({
-  stl: 'STL: -',
-  reference: 'Cylinder: -',
-});
+const metricText = ref('Geometry: -');
 
 function initScene() {
   if (!canvasHost.value) {
@@ -162,23 +151,11 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     (modelMesh.material as THREE.Material).dispose();
     modelMesh = null;
   }
-  if (referenceMesh) {
-    scene.remove(referenceMesh);
-    referenceMesh.geometry.dispose();
-    (referenceMesh.material as THREE.Material).dispose();
-    referenceMesh = null;
-  }
 
   if (!nextGeometry) {
-    metricText.value = {
-      stl: 'STL: -',
-      reference: 'Cylinder: -',
-    };
+    metricText.value = 'Geometry: -';
     return;
   }
-
-  const shouldCompare = Boolean(props.compareEnabled && props.compareSpec);
-  const compareOffset = shouldCompare ? 34 : 0;
 
   modelMesh = new THREE.Mesh(
     nextGeometry,
@@ -190,37 +167,11 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   );
 
   modelMesh.rotation.x = -Math.PI / 2;
-  modelMesh.position.x = shouldCompare ? -compareOffset : 0;
   modelMesh.castShadow = true;
   modelMesh.receiveShadow = true;
   scene.add(modelMesh);
 
-  if (shouldCompare && props.compareSpec) {
-    referenceMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        props.compareSpec.radius,
-        props.compareSpec.radius,
-        props.compareSpec.height,
-        props.compareSpec.radialSegments,
-      ),
-      new THREE.MeshStandardMaterial({
-        color: '#7a8e2c',
-        roughness: 0.24,
-        metalness: 0.04,
-      }),
-    );
-    referenceMesh.position.x = compareOffset;
-    referenceMesh.castShadow = true;
-    referenceMesh.receiveShadow = true;
-    scene.add(referenceMesh);
-  }
-
-  metricText.value = {
-    stl: buildStatsLabel('STL', modelMesh.geometry, 'recomputed'),
-    reference: referenceMesh
-      ? buildStatsLabel('Cylinder', referenceMesh.geometry, 'native')
-      : 'Cylinder: -',
-  };
+  metricText.value = buildStatsLabel('Native', modelMesh.geometry, 'native');
 
   fitCameraToMesh();
 }
@@ -261,24 +212,12 @@ watch(
   },
 );
 
-watch(
-  () => [props.compareEnabled, props.compareSpec] as const,
-  () => {
-    setGeometry(props.geometry);
-  },
-  { deep: true },
-);
-
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
   controls?.dispose();
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
-  }
-  if (referenceMesh) {
-    referenceMesh.geometry.dispose();
-    (referenceMesh.material as THREE.Material).dispose();
   }
   renderer?.dispose();
   renderer?.domElement.remove();
@@ -287,7 +226,6 @@ onBeforeUnmount(() => {
   camera = null;
   controls = null;
   modelMesh = null;
-  referenceMesh = null;
 });
 </script>
 

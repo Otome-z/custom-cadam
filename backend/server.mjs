@@ -19,12 +19,27 @@ loadLocalEnv(projectRoot);
 
 const PORT = Number(process.env.PORT || 3001);
 
-const OPENROUTER_SITE_URL =
-  process.env.OPENROUTER_SITE_URL || 'http://localhost:5174';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '';
-const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'sub-cadam';
-const OPENROUTER_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const QIANWEN_SITE_URL =
+  process.env.QIANWEN_SITE_URL
+  || process.env.OPENROUTER_SITE_URL
+  || 'http://localhost:5174';
+const QIANWEN_APP_NAME =
+  process.env.QIANWEN_APP_NAME
+  || process.env.OPENROUTER_APP_NAME
+  || 'sub-cadam';
+const QIANWEN_API_KEY =
+  process.env.QIANWEN_API_KEY
+  || process.env.OPENROUTER_API_KEY
+  || '';
+const QIANWEN_MODEL =
+  process.env.QIANWEN_MODEL
+  || process.env.OPENROUTER_MODEL
+  || 'qwen-plus';
+const QIANWEN_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4';
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -138,25 +153,71 @@ function readRequestBody (req) {
   });
 }
 
-async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.2 }) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
+function normalizeProvider(provider) {
+  if (provider === 'deepseek') {
+    return 'deepseek';
+  }
+  return 'qianwen';
+}
+
+function resolveProviderConfig(provider) {
+  const normalized = normalizeProvider(provider);
+
+  if (normalized === 'deepseek') {
+    return {
+      name: 'DeepSeek',
+      url: DEEPSEEK_URL,
+      apiKey: DEEPSEEK_API_KEY,
+      model: DEEPSEEK_MODEL,
+      headers: {},
+    };
   }
 
-  if (!OPENROUTER_MODEL) {
-    throw new Error('Missing OPENROUTER_MODEL in sub-cadam/.env');
+  return {
+    name: 'Qianwen',
+    url: QIANWEN_URL,
+    apiKey: QIANWEN_API_KEY,
+    model: QIANWEN_MODEL,
+    headers: {
+      'HTTP-Referer': QIANWEN_SITE_URL,
+      'X-Title': QIANWEN_APP_NAME,
+    },
+  };
+}
+
+async function requestModel (
+  {
+    provider,
+    messages,
+    maxTokens = 4000,
+    temperature = 0.2,
+  },
+) {
+  const config = resolveProviderConfig(provider);
+
+  if (!config.apiKey) {
+    if (normalizeProvider(provider) === 'deepseek') {
+      throw new Error('Missing DEEPSEEK_API_KEY in sub-cadam/.env');
+    }
+    throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
-  const response = await fetch(OPENROUTER_URL, {
+  if (!config.model) {
+    if (normalizeProvider(provider) === 'deepseek') {
+      throw new Error('Missing DEEPSEEK_MODEL in sub-cadam/.env');
+    }
+    throw new Error('Missing QIANWEN_MODEL in sub-cadam/.env');
+  }
+
+  const response = await fetch(config.url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': OPENROUTER_SITE_URL,
-      'X-Title': OPENROUTER_APP_NAME,
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers,
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model: config.model,
       max_tokens: maxTokens,
       temperature,
       messages,
@@ -165,15 +226,16 @@ async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`DashScope request failed: ${response.status} ${errText}`);
+    throw new Error(`${config.name} request failed: ${response.status} ${errText}`);
   }
 
   return response.json();
 }
 
-async function inferCatalogModel (prompt) {
+async function inferCatalogModel (prompt, provider) {
   try {
-    const data = await requestOpenRouter({
+    const data = await requestModel({
+      provider,
       maxTokens: 1200,
       temperature: 0.1,
       messages: [
@@ -197,8 +259,8 @@ async function inferCatalogModel (prompt) {
   }
 }
 
-async function generateOpenScad (prompt) {
-  const catalogModelSpec = await inferCatalogModel(prompt);
+async function generateOpenScad (prompt, provider) {
+  const catalogModelSpec = await inferCatalogModel(prompt, provider);
   const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
   const code = buildOpenScadFromModelSpec(modelSpec);
 
@@ -280,15 +342,17 @@ const server = http.createServer(async (req, res) => {
         const body = await readRequestBody(req);
         const prompt =
           typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const provider = normalizeProvider(body.provider);
 
         if (!prompt) {
           sendJson(res, 400, { error: 'Prompt is required.' });
           return;
         }
 
-        const result = await generateOpenScad(prompt);
+        const result = await generateOpenScad(prompt, provider);
         sendJson(res, 200, {
           prompt,
+          provider,
           code: result.code,
           modelSpec: result.modelSpec,
         });

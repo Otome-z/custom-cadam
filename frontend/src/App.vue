@@ -9,7 +9,7 @@
         <h1>参数化文生模型最小闭环</h1>
         <p class="intro">
           这里保留一条最短链路：输入文案，后端请求 OpenRouter 生成
-          OpenSCAD，前端 worker 编译 STL，并在右侧直接预览。
+          OpenSCAD，前端直接构建 three.js 原生几何并在右侧预览。
         </p>
 
         <form class="prompt-form" @submit.prevent="generateModel">
@@ -51,19 +51,35 @@
             >
               下载 STL
             </a>
-            <label v-if="geometry" class="checkbox-row">
-              <input
-                type="checkbox"
-                :checked="compareMode"
-                @change="compareMode = ($event.target as HTMLInputElement).checked"
-              />
-              <span>对照模式</span>
-            </label>
+            <div v-if="geometry" class="export-row">
+              <select
+                v-model="selectedExportFormat"
+                class="parameter-input export-select"
+                :disabled="isExporting"
+              >
+                <option
+                  v-for="format in exportFormats"
+                  :key="format.value"
+                  :value="format.value"
+                >
+                  {{ format.label }}
+                </option>
+              </select>
+              <button
+                class="ghost-button"
+                type="button"
+                :disabled="isExporting"
+                @click="exportCurrentGeometry"
+              >
+                {{ isExporting ? '导出中...' : '导出模型' }}
+              </button>
+            </div>
           </div>
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
-        <p v-else-if="lastPrompt" class="status">
+        <p v-if="exportError" class="status status-error">{{ exportError }}</p>
+        <p v-if="!requestError && !exportError && lastPrompt" class="status">
           最近一次请求：{{ lastPrompt }}
         </p>
         <p v-if="lastModelFamily" class="status">
@@ -154,7 +170,7 @@
         <div class="preview-header">
           <div>
             <div class="eyebrow">Preview</div>
-            <h2>Worker 编译结果</h2>
+            <h2>Native three.js preview</h2>
           </div>
           <div class="preview-state">
             <span :class="['state-pill', isCompiling ? 'state-busy' : 'state-idle']">
@@ -166,7 +182,6 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
-          :compare-enabled="compareMode"
           :compare-spec="compareSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
@@ -183,6 +198,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
+import { exportPreviewGeometry, type ExportFormat } from '@/utils/exportGeometry';
 import type { GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
@@ -197,7 +213,9 @@ const lastPrompt = ref('');
 const lastModelFamily = ref('');
 const lastModelSummary = ref('');
 const downloadUrl = ref<string | null>(null);
-const compareMode = ref(true);
+const isExporting = ref(false);
+const exportError = ref('');
+const selectedExportFormat = ref<ExportFormat>('obj');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -219,21 +237,50 @@ const readonlyParameters = computed(() =>
 const codeLineCount = computed(() =>
   code.value ? code.value.split(/\r?\n/).length : 0,
 );
+
+
+
+const exportFormats: Array<{ label: string; value: ExportFormat }> = [
+  { label: 'OBJ (.obj)', value: 'obj' },
+  { label: 'STL ASCII (.stl)', value: 'stl-ascii' },
+  { label: 'STL Binary (.stl)', value: 'stl-binary' },
+  { label: 'PLY ASCII (.ply)', value: 'ply-ascii' },
+  { label: 'PLY Binary (.ply)', value: 'ply-binary' },
+  { label: 'glTF JSON (.gltf)', value: 'gltf' },
+  { label: 'glTF Binary (.glb)', value: 'glb' },
+];
+
 const compareSpec = computed(() => {
-  const diameter = getNumberParam('strand_diameter') ?? 40;
+  const diameter =
+    getNumberParam('strand_diameter')
+    ?? getNumberParam('yarn_diameter')
+    ?? getNumberParam('diameter')
+    ?? getNumberParam('tube_diameter')
+    ?? ((getNumberParam('strand_radius')
+      ?? getNumberParam('yarn_radius')
+      ?? getNumberParam('radius')
+      ?? getNumberParam('tube_radius')
+      ?? 20) * 2);
+
   const height =
     getNumberParam('strand_length')
-    ?? getNumberParam('braid_length')
+    ?? getNumberParam('yarn_length')
+    ?? getNumberParam('length')
+    ?? getNumberParam('tube_length')
+    ?? getNumberParam('height')
     ?? 120;
-  const radialSegments = getNumberParam('radial_segments');
-  if (!radialSegments) {
-    return null;
-  }
+
+  const radialSegments =
+    getNumberParam('radial_segments')
+    ?? getNumberParam('resolution')
+    ?? getNumberParam('segments')
+    ?? getNumberParam('$fn')
+    ?? 64;
 
   return {
     radius: Math.max(0.1, diameter / 2),
     height: Math.max(0.1, height),
-    radialSegments: Math.max(3, Math.round(radialSegments)),
+    radialSegments: Math.max(48, Math.round(radialSegments)),
   };
 });
 
@@ -271,6 +318,7 @@ async function generateModel() {
 
   isGenerating.value = true;
   requestError.value = '';
+  exportError.value = '';
   copied.value = false;
 
   try {
@@ -338,6 +386,36 @@ function setStringParameter(parameterName: string, event: Event) {
 function setBooleanParameter(parameterName: string, event: Event) {
   const target = event.target as HTMLInputElement;
   updateParameterValue(parameterName, target.checked);
+}
+
+
+
+
+async function exportCurrentGeometry() {
+  if (!geometry.value) {
+    exportError.value = '当前没有可导出的几何体。';
+    return;
+  }
+
+  isExporting.value = true;
+  exportError.value = '';
+
+  try {
+    const result = await exportPreviewGeometry(geometry.value, selectedExportFormat.value);
+    const baseName = downloadFilename.value.replace(/\.stl$/i, '');
+    const url = URL.createObjectURL(result.blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${baseName}.${result.extension}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    exportError.value = error instanceof Error ? error.message : '导出失败。';
+  } finally {
+    isExporting.value = false;
+  }
 }
 
 function getNumberParam(name: string) {

@@ -38,6 +38,7 @@ export type Parameter = {
 
 export type GenerateResponse = {
   prompt: string;
+  provider?: 'qianwen' | 'deepseek';
   code: string;
   modelSpec?: {
     modelType: string;

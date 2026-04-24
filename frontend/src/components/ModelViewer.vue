@@ -3,7 +3,7 @@
     <div ref="canvasHost" class="viewer-canvas"></div>
 
     <div v-if="loading" class="viewer-overlay">
-      <span>Compiling OpenSCAD preview...</span>
+      <span>Building native three.js preview...</span>
     </div>
     <div v-else-if="error" class="viewer-overlay viewer-overlay-error">
       <div class="viewer-error-card">
@@ -23,7 +23,7 @@
     </div>
 
     <div v-if="geometry" class="viewer-metrics">
-      <span>{{ metricText.stl }}</span>
+      <span>{{ metricText.native }}</span>
       <span>{{ metricText.reference }}</span>
     </div>
   </div>
@@ -37,7 +37,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const props = defineProps<{
   geometry: BufferGeometry | null;
-  compareEnabled?: boolean;
   compareSpec?: {
     radius: number;
     height: number;
@@ -63,7 +62,7 @@ let referenceMesh: Mesh | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
 const metricText = ref({
-  stl: 'STL: -',
+  native: 'Native: -',
   reference: 'Cylinder: -',
 });
 
@@ -171,14 +170,11 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
 
   if (!nextGeometry) {
     metricText.value = {
-      stl: 'STL: -',
+      native: 'Native: -',
       reference: 'Cylinder: -',
     };
     return;
   }
-
-  const shouldCompare = Boolean(props.compareEnabled && props.compareSpec);
-  const compareOffset = shouldCompare ? 34 : 0;
 
   modelMesh = new THREE.Mesh(
     nextGeometry,
@@ -190,12 +186,12 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   );
 
   modelMesh.rotation.x = -Math.PI / 2;
-  modelMesh.position.x = shouldCompare ? -compareOffset : 0;
+  modelMesh.position.x = -36;
   modelMesh.castShadow = true;
   modelMesh.receiveShadow = true;
   scene.add(modelMesh);
 
-  if (shouldCompare && props.compareSpec) {
+  if (props.compareSpec) {
     referenceMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(
         props.compareSpec.radius,
@@ -209,14 +205,14 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
         metalness: 0.04,
       }),
     );
-    referenceMesh.position.x = compareOffset;
+    referenceMesh.position.x = 36;
     referenceMesh.castShadow = true;
     referenceMesh.receiveShadow = true;
     scene.add(referenceMesh);
   }
 
   metricText.value = {
-    stl: buildStatsLabel('STL', modelMesh.geometry, 'recomputed'),
+    native: buildStatsLabel('Native', modelMesh.geometry, 'native'),
     reference: referenceMesh
       ? buildStatsLabel('Cylinder', referenceMesh.geometry, 'native')
       : 'Cylinder: -',
@@ -262,7 +258,7 @@ watch(
 );
 
 watch(
-  () => [props.compareEnabled, props.compareSpec] as const,
+  () => props.compareSpec,
   () => {
     setGeometry(props.geometry);
   },

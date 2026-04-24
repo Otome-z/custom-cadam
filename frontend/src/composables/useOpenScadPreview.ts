@@ -84,6 +84,11 @@ export function useOpenScadPreview(
 
 function createNativePreviewGeometry(code: string, parameters: Parameter[]): BufferGeometry {
   const options = resolvePreviewGeometryOptions(code, parameters);
+  console.log({
+    options,
+    code,
+    parameters,
+  })
   return options.arcAngle !== null && options.arcRadius !== null
     ? createArcBundleGeometry(options)
     : createStraightBundleGeometry(options);

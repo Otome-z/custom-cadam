@@ -19,11 +19,11 @@ loadLocalEnv(projectRoot);
 
 const PORT = Number(process.env.PORT || 3001);
 
-const OPENROUTER_SITE_URL =
-  process.env.OPENROUTER_SITE_URL || 'http://localhost:5174';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '';
-const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'sub-cadam';
+const PROJECT_SITE_URL =
+  process.env.PROJECT_SITE_URL || 'http://localhost:5174';
+const QIANWEN_API_KEY = process.env.QIANWEN_API_KEY || '';
+const QIANWEN_MODEL = process.env.QIANWEN_MODEL || '';
+const PROJECT_APP_NAME = process.env.PROJECT_APP_NAME || 'sub-cadam';
 const OPENROUTER_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
 const MIME_TYPES = {
@@ -139,24 +139,24 @@ function readRequestBody (req) {
 }
 
 async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.2 }) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
+  if (!QIANWEN_API_KEY) {
+    throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
-  if (!OPENROUTER_MODEL) {
-    throw new Error('Missing OPENROUTER_MODEL in sub-cadam/.env');
+  if (!QIANWEN_MODEL) {
+    throw new Error('Missing QIANWEN_MODEL in sub-cadam/.env');
   }
 
   const response = await fetch(OPENROUTER_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': OPENROUTER_SITE_URL,
-      'X-Title': OPENROUTER_APP_NAME,
+      Authorization: `Bearer ${QIANWEN_API_KEY}`,
+      'HTTP-Referer': PROJECT_SITE_URL,
+      'X-Title': PROJECT_APP_NAME,
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model: QIANWEN_MODEL,
       max_tokens: maxTokens,
       temperature,
       messages,

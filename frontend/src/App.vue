@@ -452,6 +452,8 @@ function sanitizeOpenScadCode(rawCode: string) {
     .replace(/\n?```$/i, '')
     .replace(/```(?:openscad|scad)?/gi, '')
     .replace(/```/g, '')
+    .replace(/\bbreak\s*;/g, 'echo("break_removed_for_openscad");')
+    .replace(/\bcontinue\s*;/g, 'echo("continue_removed_for_openscad");')
     .trim();
 }
 

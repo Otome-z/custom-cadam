@@ -123,10 +123,16 @@ function ensureCurveResolutionDefaults (code) {
   }
 
   if (!preamble.length) {
-    return nextCode;
+    return sanitizeUnsupportedFlowStatements(nextCode);
   }
 
-  return `${preamble.join('\n')}\n\n${nextCode}`;
+  return sanitizeUnsupportedFlowStatements(`${preamble.join('\n')}\n\n${nextCode}`);
+}
+
+function sanitizeUnsupportedFlowStatements (code) {
+  return code
+    .replace(/\bbreak\s*;/g, 'echo("break_removed_for_openscad");')
+    .replace(/\bcontinue\s*;/g, 'echo("continue_removed_for_openscad");');
 }
 
 function extractMessageText (content) {

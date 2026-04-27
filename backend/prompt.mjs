@@ -14,7 +14,8 @@ Rules:
 - Use only core OpenSCAD features.
 - Keep dimensions in millimeters.
 - If the user asks for a recognizable object, build a clean simplified version.
-- Prefer cylindrical primitives, sweep-like approximations, and repeated cylindrical segments when modeling yarn.
+- Prefer continuous, manifold yarn solids that avoid visible gaps between adjacent sections.
+- For curved/wavy yarn, avoid disconnected short cylinder tiling; instead use smooth continuous constructions (e.g., hull-connected sections, rotate_extrude/linear_extrude patterns, or other gap-free OpenSCAD-native approaches).
 - When the request is underspecified, default to yarn-related geometry rather than unrelated solid objects.
 - Prefer generating connected yarn surfaces while keeping the result printable and manifold.
 - Curved yarn geometry must look smooth rather than visibly faceted.

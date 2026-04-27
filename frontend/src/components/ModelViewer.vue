@@ -24,7 +24,6 @@
 
     <div v-if="geometry" class="viewer-metrics">
       <span>{{ metricText.native }}</span>
-      <span>{{ metricText.reference }}</span>
     </div>
   </div>
 </template>
@@ -37,11 +36,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const props = defineProps<{
   geometry: BufferGeometry | null;
-  compareSpec?: {
-    radius: number;
-    height: number;
-    radialSegments: number;
-  } | null;
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
@@ -58,12 +52,10 @@ let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
-let referenceMesh: Mesh | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
 const metricText = ref({
   native: 'Native: -',
-  reference: 'Cylinder: -',
 });
 
 function initScene() {
@@ -161,17 +153,10 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     (modelMesh.material as THREE.Material).dispose();
     modelMesh = null;
   }
-  if (referenceMesh) {
-    scene.remove(referenceMesh);
-    referenceMesh.geometry.dispose();
-    (referenceMesh.material as THREE.Material).dispose();
-    referenceMesh = null;
-  }
 
   if (!nextGeometry) {
     metricText.value = {
       native: 'Native: -',
-      reference: 'Cylinder: -',
     };
     return;
   }
@@ -191,31 +176,8 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   modelMesh.receiveShadow = true;
   scene.add(modelMesh);
 
-  if (props.compareSpec) {
-    referenceMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        props.compareSpec.radius,
-        props.compareSpec.radius,
-        props.compareSpec.height,
-        props.compareSpec.radialSegments,
-      ),
-      new THREE.MeshStandardMaterial({
-        color: '#7a8e2c',
-        roughness: 0.24,
-        metalness: 0.04,
-      }),
-    );
-    referenceMesh.position.x = 36;
-    referenceMesh.castShadow = true;
-    referenceMesh.receiveShadow = true;
-    scene.add(referenceMesh);
-  }
-
   metricText.value = {
     native: buildStatsLabel('Native', modelMesh.geometry, 'native'),
-    reference: referenceMesh
-      ? buildStatsLabel('Cylinder', referenceMesh.geometry, 'native')
-      : 'Cylinder: -',
   };
 
   fitCameraToMesh();
@@ -257,24 +219,12 @@ watch(
   },
 );
 
-watch(
-  () => props.compareSpec,
-  () => {
-    setGeometry(props.geometry);
-  },
-  { deep: true },
-);
-
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
   controls?.dispose();
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
-  }
-  if (referenceMesh) {
-    referenceMesh.geometry.dispose();
-    (referenceMesh.material as THREE.Material).dispose();
   }
   renderer?.dispose();
   renderer?.domElement.remove();
@@ -283,7 +233,6 @@ onBeforeUnmount(() => {
   camera = null;
   controls = null;
   modelMesh = null;
-  referenceMesh = null;
 });
 </script>
 

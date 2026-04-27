@@ -109,7 +109,7 @@
         </p>
 
         <section
-          v-if="streamStatusMessages.length || streamThinking || streamResultPreview || finalScadCode"
+          v-if="streamStatusMessages.length || streamThinking || streamResultPreview"
           class="subpanel stream-panel"
         >
           <div class="subpanel-header">
@@ -145,11 +145,6 @@
           <div v-if="streamResultPreview" class="stream-section result-section">
             <h3>最终结果</h3>
             <pre class="stream-block result-block">{{ streamResultPreview }}</pre>
-          </div>
-
-          <div v-if="finalScadCode" class="stream-section scad-section">
-            <h3>OpenSCAD（用于生成）</h3>
-            <pre class="stream-block scad-block">{{ finalScadCode }}</pre>
           </div>
         </section>
 
@@ -281,7 +276,6 @@ const selectedImageName = ref('');
 const streamStatusMessages = ref<string[]>([]);
 const streamThinking = ref('');
 const streamResultPreview = ref('');
-const finalScadCode = ref('');
 const directOpenScad = ref('');
 const thinkingExpanded = ref(false);
 
@@ -344,7 +338,6 @@ async function generateModel() {
   streamStatusMessages.value = ['请求已发送，等待后端响应...'];
   streamThinking.value = '';
   streamResultPreview.value = '';
-  finalScadCode.value = '';
   thinkingExpanded.value = false;
 
   try {
@@ -444,7 +437,6 @@ function handleSseBlock(block: string) {
     if (typeof donePayload.code === 'string') {
       const cleanCode = sanitizeOpenScadCode(donePayload.code);
       code.value = cleanCode;
-      finalScadCode.value = cleanCode;
     }
     if (typeof donePayload.prompt === 'string') {
       lastPrompt.value = donePayload.prompt;
@@ -478,7 +470,6 @@ function applyDirectOpenScad() {
   }
 
   code.value = trimmed;
-  finalScadCode.value = trimmed;
   lastPrompt.value = '直接 OpenSCAD 输入';
   streamStatusMessages.value = ['已跳过大模型，直接使用 OpenSCAD 代码生成。'];
   streamThinking.value = '';

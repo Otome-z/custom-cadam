@@ -408,12 +408,6 @@ h2 {
   color: #d9ffe7;
 }
 
-.scad-block {
-  border-color: rgba(216, 241, 116, 0.32);
-  background: rgba(57, 64, 21, 0.35);
-  color: #f0ffc6;
-}
-
 .code-block {
   margin-top: 14px;
   border-radius: 16px;

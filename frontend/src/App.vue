@@ -8,8 +8,8 @@
         <div class="eyebrow">sub-cadam</div>
         <h1>参数化文生模型最小闭环</h1>
         <p class="intro">
-          这里保留一条最短链路：输入文案，后端请求 OpenRouter 生成
-          OpenSCAD，前端 worker 编译 STL，并在右侧直接预览。
+          这里保留一条最短链路：输入文案（可附带参考图片），后端请求 OpenRouter
+          生成 OpenSCAD，前端 worker 编译 STL，并在右侧直接预览。
         </p>
 
         <form class="prompt-form" @submit.prevent="generateModel">
@@ -21,6 +21,29 @@
             rows="8"
             placeholder="例如：生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。"
           />
+          <div class="upload-row">
+            <label class="ghost-button upload-button" for="reference-image">
+              {{ selectedImageName ? '更换参考图' : '上传参考图（可选）' }}
+            </label>
+            <input
+              id="reference-image"
+              class="file-input"
+              type="file"
+              accept="image/*"
+              @change="onImagePicked"
+            />
+            <span v-if="selectedImageName" class="image-name">
+              {{ selectedImageName }}
+            </span>
+            <button
+              v-if="selectedImageName"
+              class="ghost-button"
+              type="button"
+              @click="clearImage"
+            >
+              清空图片
+            </button>
+          </div>
 
           <div class="actions">
             <button class="primary-button" type="submit" :disabled="isGenerating">
@@ -170,7 +193,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
-import type { GenerateResponse, Parameter } from '@/types';
+import type { GenerateRequest, GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
   '生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。',
@@ -182,6 +205,8 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
+const referenceImageDataUrl = ref('');
+const selectedImageName = ref('');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -246,8 +271,9 @@ async function generateModel() {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
+      body: JSON.stringify(<GenerateRequest>{
         prompt: trimmedPrompt,
+        imageDataUrl: referenceImageDataUrl.value || undefined,
       }),
     });
 
@@ -263,6 +289,45 @@ async function generateModel() {
       error instanceof Error ? error.message : '生成请求失败。';
   } finally {
     isGenerating.value = false;
+  }
+}
+
+function onImagePicked(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  if (!file.type.startsWith('image/')) {
+    requestError.value = '仅支持上传图片文件。';
+    clearImage();
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result !== 'string') {
+      requestError.value = '图片读取失败，请重试。';
+      return;
+    }
+
+    referenceImageDataUrl.value = reader.result;
+    selectedImageName.value = file.name;
+    requestError.value = '';
+  };
+  reader.onerror = () => {
+    requestError.value = '图片读取失败，请重试。';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearImage() {
+  referenceImageDataUrl.value = '';
+  selectedImageName.value = '';
+  const input = document.getElementById('reference-image') as HTMLInputElement | null;
+  if (input) {
+    input.value = '';
   }
 }
 

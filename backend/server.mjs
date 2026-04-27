@@ -25,6 +25,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '';
 const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'sub-cadam';
 const OPENROUTER_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const MAX_REQUEST_BODY_BYTES = 12_000_000;
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -179,7 +180,7 @@ function readRequestBody (req) {
 
     req.on('data', (chunk) => {
       body += chunk;
-      if (body.length > 1_000_000) {
+      if (body.length > MAX_REQUEST_BODY_BYTES) {
         reject(new Error('Request body is too large.'));
       }
     });
@@ -229,7 +230,44 @@ async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.
   return response.json();
 }
 
-async function inferCatalogModel (prompt) {
+function sanitizeImageDataUrl (imageDataUrl) {
+  if (typeof imageDataUrl !== 'string') {
+    return '';
+  }
+
+  const trimmed = imageDataUrl.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const isDataImage = /^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/.test(trimmed);
+  if (!isDataImage) {
+    throw new Error('Invalid imageDataUrl. Expected a base64 data URL.');
+  }
+
+  return trimmed;
+}
+
+function buildUserMessageContent (prompt, imageDataUrl) {
+  if (!imageDataUrl) {
+    return prompt;
+  }
+
+  return [
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageDataUrl,
+      },
+    },
+  ];
+}
+
+async function inferCatalogModel (prompt, imageDataUrl) {
   try {
     const data = await requestOpenRouter({
       maxTokens: 1200,
@@ -241,7 +279,7 @@ async function inferCatalogModel (prompt) {
         },
         {
           role: 'user',
-          content: prompt,
+          content: buildUserMessageContent(prompt, imageDataUrl),
         },
       ],
     });
@@ -255,8 +293,8 @@ async function inferCatalogModel (prompt) {
   }
 }
 
-async function generateOpenScad (prompt) {
-  const catalogModelSpec = await inferCatalogModel(prompt);
+async function generateOpenScad (prompt, imageDataUrl) {
+  const catalogModelSpec = await inferCatalogModel(prompt, imageDataUrl);
   if (catalogModelSpec) {
     const code = buildOpenScadFromModelSpec(catalogModelSpec);
     if (code) {
@@ -277,7 +315,7 @@ async function generateOpenScad (prompt) {
       },
       {
         role: 'user',
-        content: prompt,
+        content: buildUserMessageContent(prompt, imageDataUrl),
       },
     ],
   });
@@ -363,13 +401,14 @@ const server = http.createServer(async (req, res) => {
         const body = await readRequestBody(req);
         const prompt =
           typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const imageDataUrl = sanitizeImageDataUrl(body.imageDataUrl);
 
         if (!prompt) {
           sendJson(res, 400, { error: 'Prompt is required.' });
           return;
         }
 
-        const result = await generateOpenScad(prompt);
+        const result = await generateOpenScad(prompt, imageDataUrl);
         sendJson(res, 200, {
           prompt,
           code: result.code,

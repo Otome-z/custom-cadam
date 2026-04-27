@@ -2,9 +2,10 @@
 
 一个独立的最小参数化 CAD 项目，流程只有一条主链路：
 
-`输入文案 -> Node 后端 -> OpenRouter -> OpenSCAD 代码 -> 浏览器 worker -> 3D 预览`
+`输入文案/参考图 -> Node 后端 -> OpenRouter -> OpenSCAD 代码 -> 浏览器 worker -> 3D 预览`
 
 这个项目不包含登录、额度、Supabase 等能力，只保留参数化生成和预览。
+其中参考图是可选输入：可上传图片辅助大模型理解目标造型。
 
 ## 目录
 
@@ -44,4 +45,3 @@ npm run start
 ```
 
 构建后的前端会输出到 `backend/public`，Node 服务会直接托管静态页面和 `/api/generate`。
-

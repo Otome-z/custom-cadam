@@ -177,6 +177,31 @@ h2 {
   resize: vertical;
 }
 
+.upload-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.upload-button {
+  min-height: 40px;
+}
+
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.image-name {
+  color: rgba(243, 243, 234, 0.7);
+  font-size: 13px;
+}
+
 .prompt-input:focus,
 .parameter-input:focus {
   outline: none;

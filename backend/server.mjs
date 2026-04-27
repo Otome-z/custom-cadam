@@ -232,7 +232,115 @@ async function requestModel (
   return response.json();
 }
 
-async function inferCatalogModel (prompt, provider) {
+async function requestModelStream (
+  {
+    provider,
+    messages,
+    maxTokens = 4000,
+    temperature = 0.2,
+    onDelta,
+  },
+) {
+  const config = resolveProviderConfig(provider);
+
+  if (!config.apiKey) {
+    if (normalizeProvider(provider) === 'deepseek') {
+      throw new Error('Missing DEEPSEEK_API_KEY in sub-cadam/.env');
+    }
+    throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
+  }
+
+  const response = await fetch(config.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: maxTokens,
+      temperature,
+      stream: true,
+      messages,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const errText = await response.text();
+    throw new Error(`${config.name} stream request failed: ${response.status} ${errText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data:')) {
+        continue;
+      }
+
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') {
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        continue;
+      }
+
+      const delta = parsed?.choices?.[0]?.delta;
+      if (!delta || typeof onDelta !== 'function') {
+        continue;
+      }
+
+      const reasoningChunk = extractMessageText(delta.reasoning_content);
+      if (reasoningChunk) {
+        onDelta({ type: 'thinking', text: reasoningChunk });
+      }
+
+      const contentChunk = extractMessageText(delta.content);
+      if (contentChunk) {
+        onDelta({ type: 'result', text: contentChunk });
+      }
+    }
+  }
+}
+
+function buildUserContent(prompt, imageDataUrl) {
+  if (!imageDataUrl) {
+    return prompt;
+  }
+
+  return [
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageDataUrl,
+      },
+    },
+  ];
+}
+
+async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
   try {
     const data = await requestModel({
       provider,
@@ -245,7 +353,7 @@ async function inferCatalogModel (prompt, provider) {
         },
         {
           role: 'user',
-          content: prompt,
+          content: buildUserContent(prompt, imageDataUrl),
         },
       ],
     });
@@ -257,6 +365,35 @@ async function inferCatalogModel (prompt, provider) {
     console.warn('[sub-cadam] Catalog inference failed:', error);
     return null;
   }
+}
+
+async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta) {
+  let resultText = '';
+
+  await requestModelStream({
+    provider,
+    maxTokens: 1200,
+    temperature: 0.1,
+    messages: [
+      {
+        role: 'system',
+        content: MODEL_SPEC_SYSTEM_PROMPT,
+      },
+      {
+        role: 'user',
+        content: buildUserContent(prompt, imageDataUrl),
+      },
+    ],
+    onDelta: (delta) => {
+      if (delta.type === 'result') {
+        resultText += delta.text;
+      }
+      onDelta?.(delta);
+    },
+  });
+
+  const payload = extractJsonPayload(resultText);
+  return normalizeCatalogModel(payload);
 }
 
 async function generateOpenScad (prompt, provider) {
@@ -272,6 +409,31 @@ async function generateOpenScad (prompt, provider) {
     code,
     modelSpec,
   };
+}
+
+async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) {
+  const catalogModelSpec = await inferCatalogModelStream(
+    prompt,
+    provider,
+    imageDataUrl,
+    onDelta,
+  );
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
+  const code = buildOpenScadFromModelSpec(modelSpec);
+
+  if (!code) {
+    throw new Error('Failed to build OpenSCAD from catalog model spec.');
+  }
+
+  return {
+    code,
+    modelSpec,
+  };
+}
+
+function sendSseEvent(res, event, payload) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function safeResolvePublicPath (urlPath) {
@@ -361,6 +523,62 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 500, {
           error: error instanceof Error ? error.message : 'Unknown server error',
         });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/generate-stream' && method === 'POST') {
+      try {
+        const body = await readRequestBody(req);
+        const prompt =
+          typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const provider = normalizeProvider(body.provider);
+        const imageDataUrl =
+          typeof body.imageDataUrl === 'string' ? body.imageDataUrl : '';
+
+        if (!prompt) {
+          sendJson(res, 400, { error: 'Prompt is required.' });
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-store',
+          Connection: 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        });
+
+        const result = await generateOpenScadStream(
+          prompt,
+          provider,
+          imageDataUrl,
+          (delta) => {
+            sendSseEvent(res, 'delta', delta);
+          },
+        );
+
+        sendSseEvent(res, 'done', {
+          prompt,
+          provider,
+          code: result.code,
+          modelSpec: result.modelSpec,
+        });
+        res.end();
+      } catch (error) {
+        console.error('Generate stream API failed:', error);
+        if (!res.headersSent) {
+          sendJson(res, 500, {
+            error: error instanceof Error ? error.message : 'Unknown server error',
+          });
+          return;
+        }
+
+        sendSseEvent(res, 'error', {
+          error: error instanceof Error ? error.message : 'Unknown server error',
+        });
+        res.end();
       }
       return;
     }

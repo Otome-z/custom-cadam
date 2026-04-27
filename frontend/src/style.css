@@ -343,6 +343,39 @@ h2 {
   overflow: hidden;
 }
 
+.stream-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.stream-section h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: rgba(243, 243, 234, 0.92);
+}
+
+.stream-list {
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(243, 243, 234, 0.8);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.stream-block {
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(243, 243, 234, 0.08);
+  background: rgba(5, 8, 10, 0.65);
+  color: #d9e7d1;
+  padding: 10px 12px;
+  font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow: auto;
+}
+
 .code-block {
   margin-top: 14px;
   border-radius: 16px;

@@ -82,6 +82,35 @@
           最近一次请求：{{ lastPrompt }}
         </p>
 
+        <section
+          v-if="streamStatusMessages.length || streamThinking || streamResultPreview"
+          class="subpanel stream-panel"
+        >
+          <div class="subpanel-header">
+            <h2>生成流</h2>
+            <span>{{ isGenerating ? 'streaming' : 'completed' }}</span>
+          </div>
+
+          <div v-if="streamStatusMessages.length" class="stream-section">
+            <h3>状态</h3>
+            <ul class="stream-list">
+              <li v-for="(message, index) in streamStatusMessages" :key="`${index}-${message}`">
+                {{ message }}
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="streamThinking" class="stream-section">
+            <h3>思考</h3>
+            <pre class="stream-block">{{ streamThinking }}</pre>
+          </div>
+
+          <div v-if="streamResultPreview" class="stream-section">
+            <h3>结果流</h3>
+            <pre class="stream-block">{{ streamResultPreview }}</pre>
+          </div>
+        </section>
+
         <section v-if="editableParameters.length" class="subpanel">
           <div class="subpanel-header">
             <h2>参数</h2>
@@ -207,6 +236,9 @@ const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
 const referenceImageDataUrl = ref('');
 const selectedImageName = ref('');
+const streamStatusMessages = ref<string[]>([]);
+const streamThinking = ref('');
+const streamResultPreview = ref('');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -264,9 +296,12 @@ async function generateModel() {
   isGenerating.value = true;
   requestError.value = '';
   copied.value = false;
+  streamStatusMessages.value = ['请求已发送，等待后端响应...'];
+  streamThinking.value = '';
+  streamResultPreview.value = '';
 
   try {
-    const response = await fetch('/api/generate', {
+    const response = await fetch('/api/generate/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -277,18 +312,98 @@ async function generateModel() {
       }),
     });
 
-    const payload = (await response.json()) as GenerateResponse & { error?: string };
     if (!response.ok) {
-      throw new Error(payload.error || '生成请求失败。');
+      throw new Error('流式生成请求失败。');
     }
 
-    code.value = payload.code;
-    lastPrompt.value = payload.prompt;
+    if (!response.body) {
+      throw new Error('浏览器不支持流式响应。');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      let splitIndex = buffer.indexOf('\n\n');
+
+      while (splitIndex !== -1) {
+        const block = buffer.slice(0, splitIndex);
+        buffer = buffer.slice(splitIndex + 2);
+        handleSseBlock(block);
+        splitIndex = buffer.indexOf('\n\n');
+      }
+    }
   } catch (error) {
     requestError.value =
       error instanceof Error ? error.message : '生成请求失败。';
   } finally {
     isGenerating.value = false;
+  }
+}
+
+function handleSseBlock(block: string) {
+  const lines = block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return;
+  }
+
+  const eventLine = lines.find((line) => line.startsWith('event:'));
+  const dataLine = lines.find((line) => line.startsWith('data:'));
+  if (!eventLine || !dataLine) {
+    return;
+  }
+
+  const event = eventLine.replace(/^event:\s*/, '');
+  const payloadText = dataLine.replace(/^data:\s*/, '');
+  let payload: Record<string, unknown> = {};
+
+  try {
+    payload = JSON.parse(payloadText);
+  } catch {
+    return;
+  }
+
+  if (event === 'status' && typeof payload.message === 'string') {
+    streamStatusMessages.value.push(payload.message);
+    return;
+  }
+
+  if (event === 'thinking_delta' && typeof payload.chunk === 'string') {
+    streamThinking.value += payload.chunk;
+    return;
+  }
+
+  if (event === 'result_delta' && typeof payload.chunk === 'string') {
+    streamResultPreview.value += payload.chunk;
+    return;
+  }
+
+  if (event === 'done') {
+    const donePayload = payload as GenerateResponse;
+    if (typeof donePayload.code === 'string') {
+      code.value = donePayload.code;
+      streamResultPreview.value = donePayload.code;
+    }
+    if (typeof donePayload.prompt === 'string') {
+      lastPrompt.value = donePayload.prompt;
+    }
+    streamStatusMessages.value.push('生成完成。');
+    return;
+  }
+
+  if (event === 'error' && typeof payload.error === 'string') {
+    requestError.value = payload.error;
+    streamStatusMessages.value.push('生成失败。');
   }
 }
 

@@ -26,6 +26,7 @@ const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '';
 const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'sub-cadam';
 const OPENROUTER_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 const MAX_REQUEST_BODY_BYTES = 12_000_000;
+const OPENROUTER_TIMEOUT_MS = 360_000;
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -230,6 +231,56 @@ async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.
   return response.json();
 }
 
+async function requestOpenRouterStream ({
+  messages,
+  maxTokens = 4000,
+  temperature = 0.2,
+}) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
+  }
+
+  if (!OPENROUTER_MODEL) {
+    throw new Error('Missing OPENROUTER_MODEL in sub-cadam/.env');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': OPENROUTER_SITE_URL,
+        'X-Title': OPENROUTER_APP_NAME,
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        max_tokens: maxTokens,
+        temperature,
+        stream: true,
+        messages,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`DashScope stream failed: ${response.status} ${errText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('DashScope stream has no response body.');
+    }
+
+    return response.body;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function sanitizeImageDataUrl (imageDataUrl) {
   if (typeof imageDataUrl !== 'string') {
     return '';
@@ -265,6 +316,140 @@ function buildUserMessageContent (prompt, imageDataUrl) {
       },
     },
   ];
+}
+
+function writeSseEvent (res, event, payload) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function normalizeDeltaText (value) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+
+        if (
+          part &&
+          typeof part === 'object' &&
+          'type' in part &&
+          part.type === 'text' &&
+          'text' in part &&
+          typeof part.text === 'string'
+        ) {
+          return part.text;
+        }
+
+        return '';
+      })
+      .join('');
+  }
+
+  return '';
+}
+
+function getLinePayload (line) {
+  const match = line.match(/^data:\s?(.*)$/);
+  return match ? match[1] : '';
+}
+
+async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
+  writeSseEvent(res, 'status', { message: '正在连接模型...' });
+
+  const bodyStream = await requestOpenRouterStream({
+    maxTokens: 4000,
+    temperature: 0.2,
+    messages: [
+      {
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      },
+      {
+        role: 'user',
+        content: buildUserMessageContent(prompt, imageDataUrl),
+      },
+    ],
+  });
+
+  writeSseEvent(res, 'status', { message: '模型已连接，开始生成...' });
+
+  const reader = bodyStream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let splitIndex = buffer.indexOf('\n\n');
+    while (splitIndex !== -1) {
+      const block = buffer.slice(0, splitIndex);
+      buffer = buffer.slice(splitIndex + 2);
+
+      const lines = block
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      for (const line of lines) {
+        const payload = getLinePayload(line);
+        if (!payload) {
+          continue;
+        }
+
+        if (payload === '[DONE]') {
+          continue;
+        }
+
+        let json;
+        try {
+          json = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+
+        const choice = json?.choices?.[0];
+        const delta = choice?.delta || {};
+
+        const reasoning = normalizeDeltaText(
+          delta.reasoning_content || delta.reasoning || '',
+        );
+        if (reasoning) {
+          writeSseEvent(res, 'thinking_delta', { chunk: reasoning });
+        }
+
+        const textChunk = normalizeDeltaText(delta.content);
+        if (textChunk) {
+          fullText += textChunk;
+          writeSseEvent(res, 'result_delta', { chunk: textChunk });
+        }
+      }
+
+      splitIndex = buffer.indexOf('\n\n');
+    }
+  }
+
+  const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(fullText));
+  if (!code) {
+    throw new Error('OpenRouter returned an empty response.');
+  }
+
+  writeSseEvent(res, 'done', {
+    prompt,
+    code,
+    modelSpec: null,
+  });
 }
 
 async function inferCatalogModel (prompt, imageDataUrl) {
@@ -420,6 +605,43 @@ const server = http.createServer(async (req, res) => {
           error: error instanceof Error ? error.message : 'Unknown server error',
         });
       }
+      return;
+    }
+
+    if (url.pathname === '/api/generate/stream' && method === 'POST') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      });
+
+      try {
+        const body = await readRequestBody(req);
+        const prompt =
+          typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const imageDataUrl = sanitizeImageDataUrl(body.imageDataUrl);
+
+        if (!prompt) {
+          writeSseEvent(res, 'error', { error: 'Prompt is required.' });
+          res.end();
+          return;
+        }
+
+        await streamOpenRouterToSse({
+          res,
+          prompt,
+          imageDataUrl,
+        });
+      } catch (error) {
+        writeSseEvent(res, 'error', {
+          error: error instanceof Error ? error.message : 'Unknown server error',
+        });
+      }
+
+      res.end();
       return;
     }
 

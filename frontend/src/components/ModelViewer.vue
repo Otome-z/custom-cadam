@@ -18,18 +18,18 @@
         </button>
       </div>
     </div>
-    <div v-else-if="!geometry" class="viewer-overlay viewer-overlay-idle">
+    <div v-else-if="!geometry && !hasWovenCatalogTag" class="viewer-overlay viewer-overlay-idle">
       <span>Generate a model to preview it here.</span>
     </div>
 
-    <div v-if="geometry" class="viewer-metrics">
+    <div v-if="geometry || hasWovenCatalogTag" class="viewer-metrics">
       <span>{{ metricText.native }}</span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BufferGeometry, Mesh } from 'three';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -61,6 +61,7 @@ let resizeObserver: ResizeObserver | null = null;
 const metricText = ref({
   native: 'Native: -',
 });
+const hasWovenCatalogTag = computed(() => props.code.includes('catalog_model: woven_yarn_sheet'));
 
 function initScene() {
   if (!canvasHost.value) {
@@ -255,8 +256,7 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     modelGroup = null;
   }
 
-  const hasWovenCatalogTag = props.code.includes('catalog_model: woven_yarn_sheet');
-  if (hasWovenCatalogTag) {
+  if (hasWovenCatalogTag.value) {
     modelGroup = createWovenTubeGroup();
     modelGroup.position.x = -36;
     scene.add(modelGroup);

@@ -74,6 +74,88 @@ for (row = [0 : num_rows - 1]) {
 }
 `,
   },
+  woven_yarn_sheet: {
+    displayName: 'Woven Yarn Sheet',
+    description: 'A woven-style yarn sheet with straight warp yarns and smooth sinusoidal weft yarns.',
+    parameters: {
+      yarn_diameter: { displayName: 'Yarn Diameter', description: 'Diameter of each yarn in millimeters.', defaultValue: 1, min: 0.2, max: 20, step: 0.1 },
+      warp_count: { displayName: 'Warp Count', description: 'Number of warp yarns.', defaultValue: 10, min: 1, max: 64, step: 1 },
+      warp_spacing: { displayName: 'Warp Spacing', description: 'Center spacing between warp yarns in millimeters.', defaultValue: 2, min: 0.2, max: 20, step: 0.1 },
+      warp_length: { displayName: 'Warp Length', description: 'Length of each warp yarn in millimeters.', defaultValue: 100, min: 1, max: 600, step: 1 },
+      weft_count: { displayName: 'Weft Count', description: 'Number of weft yarns.', defaultValue: 10, min: 1, max: 64, step: 1 },
+      weft_spacing: { displayName: 'Weft Spacing', description: 'Center spacing between weft yarns in millimeters.', defaultValue: 2, min: 0.2, max: 20, step: 0.1 },
+      weft_length: { displayName: 'Weft Length', description: 'Length of each weft yarn in millimeters.', defaultValue: 100, min: 1, max: 600, step: 1 },
+      amplitude: { displayName: 'Amplitude', description: 'Wave offset amplitude for weft yarn centerline. Use 0 for straight weft yarns.', defaultValue: 0, min: 0, max: 20, step: 0.1 },
+      weft_period: { displayName: 'Weft Period', description: 'Sinusoidal period along weft path in millimeters.', defaultValue: 8, min: 0.5, max: 200, step: 0.1 },
+      path_segments: { displayName: 'Path Segments', description: 'Sampling segments for smooth weft path hull.', defaultValue: 160, min: 64, max: 512, step: 2 },
+      radial_segments: { displayName: 'Radial Segments', description: 'Sphere/cylinder radial segment count.', defaultValue: 128, min: 72, max: 256, step: 4 },
+    },
+    buildCode: (params) => `// catalog_model: woven_yarn_sheet
+radial_segments = ${formatNumber(params.radial_segments)}; // 72:4:256
+path_segments = ${formatNumber(params.path_segments)}; // 64:2:512
+
+yarn_diameter = ${formatNumber(params.yarn_diameter)}; // 0.2:0.1:20
+warp_count = ${formatNumber(params.warp_count)}; // 1:1:64
+warp_spacing = ${formatNumber(params.warp_spacing)}; // 0.2:0.1:20
+warp_length = ${formatNumber(params.warp_length)}; // 1:1:600
+weft_count = ${formatNumber(params.weft_count)}; // 1:1:64
+weft_spacing = ${formatNumber(params.weft_spacing)}; // 0.2:0.1:20
+weft_length = ${formatNumber(params.weft_length)}; // 1:1:600
+amplitude = ${formatNumber(params.amplitude)}; // 0:0.1:20
+weft_period = ${formatNumber(params.weft_period)}; // 0.5:0.1:200
+
+$fn = radial_segments;
+sqrt2 = sqrt(2);
+adaptive_segments = max(path_segments, ceil(weft_length / max(0.2, yarn_diameter * 0.25)));
+
+function weft_center(j) = [j * weft_spacing / sqrt2, j * weft_spacing / sqrt2, 0];
+function warp_center(i) = [i * warp_spacing / sqrt2, -i * warp_spacing / sqrt2, 0];
+
+function wave_point(j, s) =
+  let(
+    base_x = s / sqrt2,
+    base_y = -s / sqrt2,
+    disp = amplitude * sin(360 * s / weft_period + 90),
+    disp_x = disp / sqrt2,
+    disp_y = disp / sqrt2,
+    c = weft_center(j)
+  )
+  [base_x + disp_x + c[0], base_y + disp_y + c[1], c[2]];
+
+module yarn_segment_smooth(p1, p2, radius) {
+  hull() {
+    translate(p1) sphere(r = radius, $fn = radial_segments);
+    translate(p2) sphere(r = radius, $fn = radial_segments);
+  }
+}
+
+module warp_yarn(i) {
+  c = warp_center(i);
+  translate([c[0], c[1], c[2]])
+    rotate([0, 0, 45])
+      rotate([0, 90, 0])
+        cylinder(d = yarn_diameter, h = warp_length * sqrt2, center = false, $fn = radial_segments);
+}
+
+module weft_yarn(j) {
+  for (step = [0 : adaptive_segments - 1]) {
+    s1 = step * (weft_length / adaptive_segments);
+    s2 = (step + 1) * (weft_length / adaptive_segments);
+    yarn_segment_smooth(wave_point(j, s1), wave_point(j, s2), yarn_diameter / 2);
+  }
+}
+
+for (i = [0 : warp_count - 1]) {
+  color(i % 2 == 0 ? "gray" : "white")
+    warp_yarn(i);
+}
+
+for (j = [0 : weft_count - 1]) {
+  color(j == 0 ? "yellow" : (j % 2 == 0 ? "gray" : "white"))
+    weft_yarn(j);
+}
+`,
+  },
   twisted_yarn_bundle: {
     displayName: 'Twisted Yarn Bundle',
     description: 'Several yarn strands twisting around a shared center line.',
@@ -220,6 +302,8 @@ Rules:
 - Do not output custom_scad.
 - Requests for parallel yarn rows, yarn surfaces made from side-by-side strands, or simple bundles should map to straight_yarn_bundle.
 - Requests mentioning sheet/plane/fabric-like layer should map to yarn_sheet.
+- Requests mentioning woven cloth, warp/weft, interlaced wave yarns, 经纬编织, or sinusoidal weft should map to woven_yarn_sheet.
+- For woven_yarn_sheet, set amplitude to 0 unless the user (or reference image) clearly indicates sinusoidal/wavy weft paths.
 - Requests for twisted bundles or rope-like spirals should map to twisted_yarn_bundle.
 - Requests for a single bent yarn should map to curved_yarn_path.
 - Requests for braid/plait/interlaced strands should map to braided_yarn.
@@ -229,7 +313,7 @@ Rules:
 
 Return shape:
 {
-  "modelType": "straight_yarn_bundle | yarn_sheet | twisted_yarn_bundle | curved_yarn_path | braided_yarn",
+  "modelType": "straight_yarn_bundle | yarn_sheet | woven_yarn_sheet | twisted_yarn_bundle | curved_yarn_path | braided_yarn",
   "summary": "short plain-language summary",
   "parameters": {
     "parameter_name": number
@@ -273,8 +357,10 @@ export function fallbackCatalogModel(promptText = '') {
   const prompt = promptText.toLowerCase();
   let modelType = 'straight_yarn_bundle';
 
-  if (/(braid|plait|编织|辫)/.test(prompt)) {
+  if (/(braid|plait|辫)/.test(prompt)) {
     modelType = 'braided_yarn';
+  } else if (/(woven|weave|warp|weft|经|纬|波浪)/.test(prompt)) {
+    modelType = 'woven_yarn_sheet';
   } else if (/(sheet|fabric|surface|面|片|布)/.test(prompt)) {
     modelType = 'yarn_sheet';
   } else if (/(twist|rope|螺旋|扭)/.test(prompt)) {

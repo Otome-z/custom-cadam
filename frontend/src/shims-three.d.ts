@@ -1,4 +1,13 @@
 declare module 'three' {
+  export class Object3D {
+    position: { x: number; y: number; z: number };
+    traverse(callback: (child: Object3D) => void): void;
+    add(...objects: unknown[]): void;
+    remove(...objects: unknown[]): void;
+  }
+
+  export class Group extends Object3D {}
+
   export class BufferGeometry {
     center(): this;
     rotateX(angle: number): this;
@@ -14,10 +23,9 @@ declare module 'three' {
     dispose(): void;
   }
 
-  export class Mesh {
+  export class Mesh extends Object3D {
     constructor(geometry?: BufferGeometry, material?: Material);
     rotation: { x: number };
-    position: { x: number; y: number };
     geometry: BufferGeometry;
     material: Material;
     castShadow: boolean;
@@ -35,10 +43,8 @@ declare module 'three' {
     dispose(): void;
   }
 
-  export class Scene {
+  export class Scene extends Object3D {
     background: unknown;
-    add(...objects: unknown[]): void;
-    remove(...objects: unknown[]): void;
   }
 
   export class PerspectiveCamera {
@@ -83,9 +89,13 @@ declare module 'three' {
     constructor(points?: Vector3[], closed?: boolean, curveType?: string, tension?: number);
   }
 
+  export class LineCurve3 {
+    constructor(v1?: Vector3, v2?: Vector3);
+  }
+
   export class TubeGeometry extends BufferGeometry {
     constructor(
-      path: CatmullRomCurve3,
+      path: CatmullRomCurve3 | LineCurve3,
       tubularSegments?: number,
       radius?: number,
       radialSegments?: number,

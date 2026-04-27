@@ -106,6 +106,7 @@ weft_period = ${formatNumber(params.weft_period)}; // 0.5:0.1:200
 
 $fn = radial_segments;
 sqrt2 = sqrt(2);
+adaptive_segments = max(path_segments, ceil(weft_length / max(0.2, yarn_diameter * 0.25)));
 
 function weft_center(j) = [j * weft_spacing / sqrt2, j * weft_spacing / sqrt2, 0];
 function warp_center(i) = [i * warp_spacing / sqrt2, -i * warp_spacing / sqrt2, 0];
@@ -137,9 +138,9 @@ module warp_yarn(i) {
 }
 
 module weft_yarn(j) {
-  for (step = [0 : path_segments - 1]) {
-    s1 = step * (weft_length / path_segments);
-    s2 = (step + 1) * (weft_length / path_segments);
+  for (step = [0 : adaptive_segments - 1]) {
+    s1 = step * (weft_length / adaptive_segments);
+    s2 = (step + 1) * (weft_length / adaptive_segments);
     yarn_segment_smooth(wave_point(j, s1), wave_point(j, s2), yarn_diameter / 2);
   }
 }

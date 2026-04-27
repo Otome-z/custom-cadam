@@ -383,6 +383,24 @@ h2 {
   overflow: auto;
 }
 
+.thinking-block {
+  border-color: rgba(128, 185, 255, 0.35);
+  background: rgba(58, 94, 148, 0.2);
+  color: #dce9ff;
+}
+
+.result-block {
+  border-color: rgba(136, 240, 194, 0.3);
+  background: rgba(26, 78, 63, 0.24);
+  color: #d9ffe7;
+}
+
+.scad-block {
+  border-color: rgba(216, 241, 116, 0.32);
+  background: rgba(57, 64, 21, 0.35);
+  color: #f0ffc6;
+}
+
 .code-block {
   margin-top: 14px;
   border-radius: 16px;

@@ -126,19 +126,19 @@
             </ul>
           </div>
 
-          <div v-if="streamThinking" class="stream-section">
+          <div v-if="streamThinking" class="stream-section thinking-section">
             <h3>思考</h3>
-            <pre class="stream-block">{{ streamThinking }}</pre>
+            <pre class="stream-block thinking-block">{{ streamThinking }}</pre>
           </div>
 
-          <div v-if="streamResultPreview" class="stream-section">
-            <h3>结果流</h3>
-            <pre class="stream-block">{{ streamResultPreview }}</pre>
+          <div v-if="streamResultPreview" class="stream-section result-section">
+            <h3>最终结果</h3>
+            <pre class="stream-block result-block">{{ streamResultPreview }}</pre>
           </div>
 
-          <div v-if="finalScadCode" class="stream-section">
-            <h3>最终 OpenSCAD（用于生成）</h3>
-            <pre class="stream-block">{{ finalScadCode }}</pre>
+          <div v-if="finalScadCode" class="stream-section scad-section">
+            <h3>OpenSCAD（用于生成）</h3>
+            <pre class="stream-block scad-block">{{ finalScadCode }}</pre>
           </div>
         </section>
 

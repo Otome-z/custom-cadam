@@ -5,8 +5,32 @@ import type { Parameter } from '@/types';
 import { WorkerMessageType, type WorkerMessage, type WorkerResponseMessage } from '@/worker/types';
 
 
+function cloneValue<T extends Parameter['value']>(value: T): T {
+  return (Array.isArray(value) ? [...value] : value) as T;
+}
+
 function cloneParameters(parameters: Parameter[]): Parameter[] {
-  return structuredClone(parameters);
+  return parameters.map((parameter) => ({
+    name: parameter.name,
+    displayName: parameter.displayName,
+    value: cloneValue(parameter.value),
+    defaultValue: cloneValue(parameter.defaultValue),
+    type: parameter.type,
+    description: parameter.description,
+    range: parameter.range
+      ? {
+          min: parameter.range.min,
+          max: parameter.range.max,
+          step: parameter.range.step,
+        }
+      : undefined,
+    options: parameter.options
+      ? parameter.options.map((option) => ({
+          value: option.value,
+          label: option.label,
+        }))
+      : undefined,
+  }));
 }
 
 function normalizeWorkerError(response: WorkerResponseMessage): Error {

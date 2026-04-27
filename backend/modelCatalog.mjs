@@ -85,7 +85,7 @@ for (row = [0 : num_rows - 1]) {
       weft_count: { displayName: 'Weft Count', description: 'Number of weft yarns.', defaultValue: 10, min: 1, max: 64, step: 1 },
       weft_spacing: { displayName: 'Weft Spacing', description: 'Center spacing between weft yarns in millimeters.', defaultValue: 2, min: 0.2, max: 20, step: 0.1 },
       weft_length: { displayName: 'Weft Length', description: 'Length of each weft yarn in millimeters.', defaultValue: 100, min: 1, max: 600, step: 1 },
-      amplitude: { displayName: 'Amplitude', description: 'Wave offset amplitude for weft yarn centerline.', defaultValue: 1, min: 0, max: 20, step: 0.1 },
+      amplitude: { displayName: 'Amplitude', description: 'Wave offset amplitude for weft yarn centerline. Use 0 for straight weft yarns.', defaultValue: 0, min: 0, max: 20, step: 0.1 },
       weft_period: { displayName: 'Weft Period', description: 'Sinusoidal period along weft path in millimeters.', defaultValue: 8, min: 0.5, max: 200, step: 0.1 },
       path_segments: { displayName: 'Path Segments', description: 'Sampling segments for smooth weft path hull.', defaultValue: 160, min: 64, max: 512, step: 2 },
       radial_segments: { displayName: 'Radial Segments', description: 'Sphere/cylinder radial segment count.', defaultValue: 128, min: 72, max: 256, step: 4 },
@@ -303,6 +303,7 @@ Rules:
 - Requests for parallel yarn rows, yarn surfaces made from side-by-side strands, or simple bundles should map to straight_yarn_bundle.
 - Requests mentioning sheet/plane/fabric-like layer should map to yarn_sheet.
 - Requests mentioning woven cloth, warp/weft, interlaced wave yarns, 经纬编织, or sinusoidal weft should map to woven_yarn_sheet.
+- For woven_yarn_sheet, set amplitude to 0 unless the user (or reference image) clearly indicates sinusoidal/wavy weft paths.
 - Requests for twisted bundles or rope-like spirals should map to twisted_yarn_bundle.
 - Requests for a single bent yarn should map to curved_yarn_path.
 - Requests for braid/plait/interlaced strands should map to braided_yarn.

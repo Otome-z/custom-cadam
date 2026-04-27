@@ -340,6 +340,10 @@ async function generateModel() {
         splitIndex = buffer.indexOf('\n\n');
       }
     }
+
+    if (buffer.trim()) {
+      handleSseBlock(buffer);
+    }
   } catch (error) {
     requestError.value =
       error instanceof Error ? error.message : '生成请求失败。';
@@ -391,8 +395,9 @@ function handleSseBlock(block: string) {
   if (event === 'done') {
     const donePayload = payload as GenerateResponse;
     if (typeof donePayload.code === 'string') {
-      code.value = donePayload.code;
-      streamResultPreview.value = donePayload.code;
+      const cleanCode = sanitizeOpenScadCode(donePayload.code);
+      code.value = cleanCode;
+      streamResultPreview.value = cleanCode;
     }
     if (typeof donePayload.prompt === 'string') {
       lastPrompt.value = donePayload.prompt;
@@ -405,6 +410,15 @@ function handleSseBlock(block: string) {
     requestError.value = payload.error;
     streamStatusMessages.value.push('生成失败。');
   }
+}
+
+function sanitizeOpenScadCode(rawCode: string) {
+  return rawCode
+    .replace(/^```(?:openscad|scad)?\s*\n?/i, '')
+    .replace(/\n?```$/i, '')
+    .replace(/```(?:openscad|scad)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
 }
 
 function onImagePicked(event: Event) {

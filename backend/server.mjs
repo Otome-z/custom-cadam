@@ -62,6 +62,17 @@ function sendText (res, statusCode, message) {
 
 function normalizeGeneratedCode (rawText) {
   const trimmed = rawText.trim();
+  const normalizedFenceText = trimmed
+    .replace(/^```(?:openscad|scad)?\s*\n?/i, '')
+    .replace(/\n?```$/i, '')
+    .replace(/```(?:openscad|scad)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  if (normalizedFenceText !== trimmed) {
+    return normalizedFenceText;
+  }
+
   const exactBlock = trimmed.match(/^```(?:openscad)?\s*\n?([\s\S]*?)\n?```$/i);
   if (exactBlock) {
     return exactBlock[1].trim();
@@ -362,6 +373,29 @@ function getLinePayload (line) {
   return match ? match[1] : '';
 }
 
+function processSseBlock (block, onPayload) {
+  const lines = block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const payload = getLinePayload(line);
+    if (!payload || payload === '[DONE]') {
+      continue;
+    }
+
+    let json;
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+
+    onPayload(json);
+  }
+}
+
 async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
   writeSseEvent(res, 'status', { message: '正在连接模型...' });
 
@@ -400,28 +434,7 @@ async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
       const block = buffer.slice(0, splitIndex);
       buffer = buffer.slice(splitIndex + 2);
 
-      const lines = block
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-      for (const line of lines) {
-        const payload = getLinePayload(line);
-        if (!payload) {
-          continue;
-        }
-
-        if (payload === '[DONE]') {
-          continue;
-        }
-
-        let json;
-        try {
-          json = JSON.parse(payload);
-        } catch {
-          continue;
-        }
-
+      processSseBlock(block, (json) => {
         const choice = json?.choices?.[0];
         const delta = choice?.delta || {};
 
@@ -437,10 +450,29 @@ async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
           fullText += textChunk;
           writeSseEvent(res, 'result_delta', { chunk: textChunk });
         }
-      }
+      });
 
       splitIndex = buffer.indexOf('\n\n');
     }
+  }
+
+  if (buffer.trim()) {
+    processSseBlock(buffer, (json) => {
+      const choice = json?.choices?.[0];
+      const delta = choice?.delta || {};
+      const reasoning = normalizeDeltaText(
+        delta.reasoning_content || delta.reasoning || '',
+      );
+      if (reasoning) {
+        writeSseEvent(res, 'thinking_delta', { chunk: reasoning });
+      }
+
+      const textChunk = normalizeDeltaText(delta.content);
+      if (textChunk) {
+        fullText += textChunk;
+        writeSseEvent(res, 'result_delta', { chunk: textChunk });
+      }
+    });
   }
 
   const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(fullText));

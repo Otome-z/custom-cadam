@@ -15,10 +15,12 @@
 ## 配置
 
 1. 在 `sub-cadam` 目录下复制 `.env.example` 为 `.env`
-2. 填好下面两个值：
+2. 填好下面几个值：
 
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`
+- `QIANWEN_API_KEY`
+- `QIANWEN_MODEL`
+- `PROJECT_SITE_URL`
+- `PROJECT_APP_NAME`
 
 ## 本地开发
 

@@ -189,6 +189,8 @@ function createWovenTubeGroup(): THREE.Group {
   const weftPeriod = Math.max(0.5, readNumericParameter('weft_period', 4 * warpSpacing));
   const pathSegments = Math.max(64, Math.round(readNumericParameter('path_segments', 160)));
   const adaptiveSegments = Math.max(pathSegments, Math.ceil(weftLength / Math.max(0.2, yarnDiameter * 0.25)));
+  const waveSampleSegments = Math.max(adaptiveSegments * 4, 256);
+  const waveTubeSegments = Math.max(adaptiveSegments * 6, 384);
   const sqrt2 = Math.sqrt(2);
 
   const group = new THREE.Group();
@@ -219,8 +221,8 @@ function createWovenTubeGroup(): THREE.Group {
     const points: THREE.Vector3[] = [];
     const x0 = (j * weftSpacing) / sqrt2;
     const y0 = (j * weftSpacing) / sqrt2;
-    for (let step = 0; step <= adaptiveSegments; step += 1) {
-      const s = (step * weftLength) / adaptiveSegments;
+    for (let step = 0; step <= waveSampleSegments; step += 1) {
+      const s = (step * weftLength) / waveSampleSegments;
       const baseX = s / sqrt2;
       const baseY = -s / sqrt2;
       const disp = amplitude * Math.sin(((360 * s) / weftPeriod + 90) * Math.PI / 180);
@@ -229,7 +231,7 @@ function createWovenTubeGroup(): THREE.Group {
       points.push(new THREE.Vector3(baseX + dispX + x0, baseY + dispY + y0, 0));
     }
     const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-    const geometry = new THREE.TubeGeometry(curve, adaptiveSegments, radius, radialSegments, false);
+    const geometry = new THREE.TubeGeometry(curve, waveTubeSegments, radius, radialSegments, false);
     const material = buildMaterial(j === 0 ? '#d0b54b' : (j % 2 === 0 ? '#8c9b84' : '#d9ddd0'));
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;

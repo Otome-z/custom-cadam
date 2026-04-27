@@ -30,6 +30,10 @@ function normalizeWorkerError(response: WorkerResponseMessage): Error {
   return new Error(message);
 }
 
+function isWovenCatalogCode(source: string): boolean {
+  return source.includes('catalog_model: woven_yarn_sheet');
+}
+
 export function useOpenScadPreview(
   code: Ref<string>,
   params: Ref<Parameter[]>,
@@ -51,6 +55,15 @@ export function useOpenScadPreview(
   const compile = () => {
     const source = code.value.trim();
     if (!source) {
+      activeRequestId = null;
+      output.value = null;
+      clearGeometry();
+      error.value = null;
+      isCompiling.value = false;
+      return;
+    }
+
+    if (isWovenCatalogCode(source)) {
       activeRequestId = null;
       output.value = null;
       clearGeometry();

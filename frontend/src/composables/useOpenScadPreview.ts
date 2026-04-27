@@ -5,30 +5,20 @@ import type { Parameter } from '@/types';
 import { WorkerMessageType, type WorkerMessage, type WorkerResponseMessage } from '@/worker/types';
 
 
-function cloneValue<T extends Parameter['value']>(value: T): T {
+function cloneParameterValue<T extends Parameter['value']>(value: T): T {
   return (Array.isArray(value) ? [...value] : value) as T;
 }
 
-function cloneParameters(parameters: Parameter[]): Parameter[] {
+function serializeParametersForWorker(parameters: Parameter[]): Parameter[] {
   return parameters.map((parameter) => ({
-    name: parameter.name,
-    displayName: parameter.displayName,
-    value: cloneValue(parameter.value),
-    defaultValue: cloneValue(parameter.defaultValue),
-    type: parameter.type,
-    description: parameter.description,
+    ...parameter,
+    value: cloneParameterValue(parameter.value),
+    defaultValue: cloneParameterValue(parameter.defaultValue),
     range: parameter.range
-      ? {
-          min: parameter.range.min,
-          max: parameter.range.max,
-          step: parameter.range.step,
-        }
+      ? { ...parameter.range }
       : undefined,
     options: parameter.options
-      ? parameter.options.map((option) => ({
-          value: option.value,
-          label: option.label,
-        }))
+      ? parameter.options.map((option) => ({ ...option }))
       : undefined,
   }));
 }
@@ -80,7 +70,7 @@ export function useOpenScadPreview(
       data: {
         code: source,
         fileType: 'stl',
-        params: cloneParameters(params.value),
+        params: serializeParametersForWorker(params.value),
       },
     };
 

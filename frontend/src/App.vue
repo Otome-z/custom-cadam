@@ -145,7 +145,6 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
-          :compare-spec="compareSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
@@ -191,25 +190,6 @@ const editableParameters = computed(() =>
 
 const codeLineCount = computed(() => (code.value ? code.value.split(/\r?\n/).length : 0));
 
-const compareSpec = computed(() => {
-  const diameter =
-    getNumberParam('strand_diameter')
-    ?? getNumberParam('yarn_diameter')
-    ?? getNumberParam('diameter')
-    ?? ((getNumberParam('radius') ?? 20) * 2);
-  const height =
-    getNumberParam('strand_length')
-    ?? getNumberParam('yarn_length')
-    ?? getNumberParam('length')
-    ?? 120;
-  const radialSegments = getNumberParam('radial_segments') ?? getNumberParam('$fn') ?? 64;
-
-  return {
-    radius: Math.max(0.1, diameter / 2),
-    height: Math.max(0.1, height),
-    radialSegments: Math.max(48, Math.round(radialSegments)),
-  };
-});
 
 watch(code, (nextCode) => {
   parameters.value = nextCode ? parseParameters(nextCode) : [];
@@ -363,9 +343,6 @@ function setBooleanParameter(parameterName: string, event: Event) {
   updateParameterValue(parameterName, target.checked);
 }
 
-function getNumberParam(name: string) {
-  const target = parameters.value.find((parameter) => parameter.name === name);
-  return target && typeof target.value === 'number' ? target.value : null;
-}
+
 
 </script>

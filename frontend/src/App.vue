@@ -145,6 +145,8 @@
         <ModelViewer
           class="viewer"
           :geometry="geometry"
+          :code="code"
+          :parameters="parameters"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"

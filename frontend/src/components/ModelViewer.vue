@@ -33,9 +33,12 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BufferGeometry, Mesh } from 'three';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import type { Parameter } from '@/types';
 
 const props = defineProps<{
   geometry: BufferGeometry | null;
+  code: string;
+  parameters: Parameter[];
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
@@ -52,6 +55,7 @@ let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
+let modelGroup: THREE.Group | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
 const metricText = ref({
@@ -124,11 +128,16 @@ function resizeRenderer() {
 }
 
 function fitCameraToMesh() {
-  if (!camera || !controls || !modelMesh) {
+  if (!camera || !controls) {
     return;
   }
 
-  const box = new THREE.Box3().setFromObject(modelMesh);
+  const target = modelGroup || modelMesh;
+  if (!target) {
+    return;
+  }
+
+  const box = new THREE.Box3().setFromObject(target);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 1);
@@ -143,6 +152,93 @@ function fitCameraToMesh() {
   controls.update();
 }
 
+function disposeObject3D(node: THREE.Object3D) {
+  node.traverse((child) => {
+    const maybeMesh = child as THREE.Mesh;
+    if (maybeMesh.geometry) {
+      maybeMesh.geometry.dispose();
+    }
+    const material = maybeMesh.material;
+    if (Array.isArray(material)) {
+      material.forEach((item) => item.dispose());
+    } else {
+      material?.dispose();
+    }
+  });
+}
+
+function readNumericParameter(name: string, fallback: number): number {
+  const parameter = props.parameters.find((item) => item.name === name);
+  const rawValue = parameter?.value;
+  const value = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function createWovenTubeGroup(): THREE.Group {
+  const radialSegments = Math.max(12, Math.round(readNumericParameter('radial_segments', 128)));
+  const yarnDiameter = Math.max(0.2, readNumericParameter('yarn_diameter', 1));
+  const radius = yarnDiameter / 2;
+  const warpCount = Math.max(1, Math.round(readNumericParameter('warp_count', 10)));
+  const warpSpacing = Math.max(0.2, readNumericParameter('warp_spacing', 2));
+  const warpLength = Math.max(1, readNumericParameter('warp_length', 100));
+  const weftCount = Math.max(1, Math.round(readNumericParameter('weft_count', 10)));
+  const weftSpacing = Math.max(0.2, readNumericParameter('weft_spacing', 2));
+  const weftLength = Math.max(1, readNumericParameter('weft_length', 100));
+  const amplitude = Math.max(0, readNumericParameter('amplitude', yarnDiameter));
+  const weftPeriod = Math.max(0.5, readNumericParameter('weft_period', 4 * warpSpacing));
+  const pathSegments = Math.max(64, Math.round(readNumericParameter('path_segments', 160)));
+  const adaptiveSegments = Math.max(pathSegments, Math.ceil(weftLength / Math.max(0.2, yarnDiameter * 0.25)));
+  const sqrt2 = Math.sqrt(2);
+
+  const group = new THREE.Group();
+
+  const buildMaterial = (hexColor: string) => new THREE.MeshStandardMaterial({
+    color: hexColor,
+    roughness: 0.24,
+    metalness: 0.04,
+  });
+
+  for (let i = 0; i < warpCount; i += 1) {
+    const cx = (i * warpSpacing) / sqrt2;
+    const cy = (-i * warpSpacing) / sqrt2;
+    const end = (warpLength * sqrt2);
+    const curve = new THREE.LineCurve3(
+      new THREE.Vector3(cx, cy, 0),
+      new THREE.Vector3(cx + end / sqrt2, cy - end / sqrt2, 0),
+    );
+    const geometry = new THREE.TubeGeometry(curve, 32, radius, radialSegments, false);
+    const material = buildMaterial(i % 2 === 0 ? '#8c9b84' : '#d9ddd0');
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+
+  for (let j = 0; j < weftCount; j += 1) {
+    const points: THREE.Vector3[] = [];
+    const x0 = (j * weftSpacing) / sqrt2;
+    const y0 = (j * weftSpacing) / sqrt2;
+    for (let step = 0; step <= adaptiveSegments; step += 1) {
+      const s = (step * weftLength) / adaptiveSegments;
+      const baseX = s / sqrt2;
+      const baseY = -s / sqrt2;
+      const disp = amplitude * Math.sin(((360 * s) / weftPeriod + 90) * Math.PI / 180);
+      const dispX = disp / sqrt2;
+      const dispY = disp / sqrt2;
+      points.push(new THREE.Vector3(baseX + dispX + x0, baseY + dispY + y0, 0));
+    }
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const geometry = new THREE.TubeGeometry(curve, adaptiveSegments, radius, radialSegments, false);
+    const material = buildMaterial(j === 0 ? '#d0b54b' : (j % 2 === 0 ? '#8c9b84' : '#d9ddd0'));
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+
+  return group;
+}
+
 function setGeometry(nextGeometry: BufferGeometry | null) {
   if (!scene) {
     return;
@@ -152,6 +248,23 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     scene.remove(modelMesh);
     (modelMesh.material as THREE.Material).dispose();
     modelMesh = null;
+  }
+  if (modelGroup) {
+    scene.remove(modelGroup);
+    disposeObject3D(modelGroup);
+    modelGroup = null;
+  }
+
+  const hasWovenCatalogTag = props.code.includes('catalog_model: woven_yarn_sheet');
+  if (hasWovenCatalogTag) {
+    modelGroup = createWovenTubeGroup();
+    modelGroup.position.x = -36;
+    scene.add(modelGroup);
+    metricText.value = {
+      native: buildStatsLabel('Native', modelGroup, 'tube'),
+    };
+    fitCameraToMesh();
+    return;
   }
 
   if (!nextGeometry) {
@@ -183,16 +296,37 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   fitCameraToMesh();
 }
 
-function buildStatsLabel(label: string, geometry: BufferGeometry, normalMode: string) {
-  const geometryData = geometry as BufferGeometry & {
-    attributes?: { position?: { count?: number } };
-    index?: { count?: number } | null;
-  };
+function buildStatsLabel(label: string, object: THREE.Object3D | BufferGeometry, normalMode: string) {
+  let vertexCount = 0;
+  let triangleCount = 0;
 
-  const vertexCount = geometryData.attributes?.position?.count ?? 0;
-  const triangleCount = geometryData.index
-    ? Math.floor((geometryData.index.count ?? 0) / 3)
-    : Math.floor(vertexCount / 3);
+  if (object instanceof THREE.BufferGeometry) {
+    const geometryData = object as BufferGeometry & {
+      attributes?: { position?: { count?: number } };
+      index?: { count?: number } | null;
+    };
+    vertexCount = geometryData.attributes?.position?.count ?? 0;
+    triangleCount = geometryData.index
+      ? Math.floor((geometryData.index.count ?? 0) / 3)
+      : Math.floor(vertexCount / 3);
+  } else {
+    object.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.geometry) {
+        return;
+      }
+      const geometryData = mesh.geometry as BufferGeometry & {
+        attributes?: { position?: { count?: number } };
+        index?: { count?: number } | null;
+      };
+      const childVertices = geometryData.attributes?.position?.count ?? 0;
+      const childTriangles = geometryData.index
+        ? Math.floor((geometryData.index.count ?? 0) / 3)
+        : Math.floor(childVertices / 3);
+      vertexCount += childVertices;
+      triangleCount += childTriangles;
+    });
+  }
 
   return `${label}: v=${vertexCount} / t=${triangleCount} / n=${normalMode}`;
 }
@@ -219,12 +353,22 @@ watch(
   },
 );
 
+watch(
+  () => [props.code, JSON.stringify(props.parameters)],
+  () => {
+    setGeometry(props.geometry);
+  },
+);
+
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
   controls?.dispose();
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
+  }
+  if (modelGroup) {
+    disposeObject3D(modelGroup);
   }
   renderer?.dispose();
   renderer?.domElement.remove();
@@ -233,6 +377,7 @@ onBeforeUnmount(() => {
   camera = null;
   controls = null;
   modelMesh = null;
+  modelGroup = null;
 });
 </script>
 

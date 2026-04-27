@@ -361,6 +361,19 @@ h2 {
   color: rgba(243, 243, 234, 0.92);
 }
 
+.thinking-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.thinking-toggle {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
 .stream-list {
   margin: 0;
   padding-left: 18px;

@@ -127,8 +127,19 @@
           </div>
 
           <div v-if="streamThinking" class="stream-section thinking-section">
-            <h3>思考</h3>
-            <pre class="stream-block thinking-block">{{ streamThinking }}</pre>
+            <div class="thinking-header">
+              <h3>思考</h3>
+              <button
+                class="ghost-button thinking-toggle"
+                type="button"
+                @click="toggleThinking"
+              >
+                {{ thinkingExpanded ? '隐藏思考' : '显示思考' }}
+              </button>
+            </div>
+            <pre v-if="thinkingExpanded" class="stream-block thinking-block">
+              {{ streamThinking }}
+            </pre>
           </div>
 
           <div v-if="streamResultPreview" class="stream-section result-section">
@@ -256,7 +267,7 @@ import { parseParameters } from '@/utils/parseParameters';
 import type { GenerateRequest, GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
-  '生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。',
+  '根据参考图图片生成',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);
@@ -272,6 +283,7 @@ const streamThinking = ref('');
 const streamResultPreview = ref('');
 const finalScadCode = ref('');
 const directOpenScad = ref('');
+const thinkingExpanded = ref(false);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -333,6 +345,7 @@ async function generateModel() {
   streamThinking.value = '';
   streamResultPreview.value = '';
   finalScadCode.value = '';
+  thinkingExpanded.value = false;
 
   try {
     const response = await fetch('/api/generate/stream', {
@@ -475,6 +488,10 @@ function applyDirectOpenScad() {
 
 function clearDirectOpenScad() {
   directOpenScad.value = '';
+}
+
+function toggleThinking() {
+  thinkingExpanded.value = !thinkingExpanded.value;
 }
 
 function onImagePicked(event: Event) {

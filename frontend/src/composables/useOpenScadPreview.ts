@@ -4,6 +4,11 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import type { Parameter } from '@/types';
 import { WorkerMessageType, type WorkerMessage, type WorkerResponseMessage } from '@/worker/types';
 
+
+function cloneParameters(parameters: Parameter[]): Parameter[] {
+  return structuredClone(parameters);
+}
+
 function normalizeWorkerError(response: WorkerResponseMessage): Error {
   const message = response.err?.stdErr?.join('\n').trim()
     || response.err?.message
@@ -51,7 +56,7 @@ export function useOpenScadPreview(
       data: {
         code: source,
         fileType: 'stl',
-        params: params.value,
+        params: cloneParameters(params.value),
       },
     };
 

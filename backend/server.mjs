@@ -396,6 +396,74 @@ function processSseBlock (block, onPayload) {
   }
 }
 
+function createThinkTagSplitter () {
+  const THINK_OPEN = '<think>';
+  const THINK_CLOSE = '</think>';
+  const MIN_TAG_BUFFER = THINK_CLOSE.length;
+  let inThink = false;
+  let carry = '';
+
+  function process (chunk) {
+    let text = carry + chunk;
+    carry = '';
+    let thinkingText = '';
+    let resultText = '';
+    let cursor = 0;
+
+    while (cursor < text.length) {
+      if (inThink) {
+        const closeIndex = text.indexOf(THINK_CLOSE, cursor);
+        if (closeIndex === -1) {
+          const safeEnd = Math.max(cursor, text.length - MIN_TAG_BUFFER);
+          thinkingText += text.slice(cursor, safeEnd);
+          carry = text.slice(safeEnd);
+          break;
+        }
+
+        thinkingText += text.slice(cursor, closeIndex);
+        cursor = closeIndex + THINK_CLOSE.length;
+        inThink = false;
+        continue;
+      }
+
+      const openIndex = text.indexOf(THINK_OPEN, cursor);
+      if (openIndex === -1) {
+        const safeEnd = Math.max(cursor, text.length - MIN_TAG_BUFFER);
+        resultText += text.slice(cursor, safeEnd);
+        carry = text.slice(safeEnd);
+        break;
+      }
+
+      resultText += text.slice(cursor, openIndex);
+      cursor = openIndex + THINK_OPEN.length;
+      inThink = true;
+    }
+
+    return {
+      thinkingText,
+      resultText,
+    };
+  }
+
+  function flushRemainder () {
+    if (!carry) {
+      return { thinkingText: '', resultText: '' };
+    }
+
+    const payload = inThink
+      ? { thinkingText: carry, resultText: '' }
+      : { thinkingText: '', resultText: carry };
+
+    carry = '';
+    return payload;
+  }
+
+  return {
+    process,
+    flushRemainder,
+  };
+}
+
 async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
   writeSseEvent(res, 'status', { message: '正在连接模型...' });
 
@@ -420,6 +488,7 @@ async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  const thinkTagSplitter = createThinkTagSplitter();
 
   while (true) {
     const { value, done } = await reader.read();
@@ -447,8 +516,14 @@ async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
 
         const textChunk = normalizeDeltaText(delta.content);
         if (textChunk) {
-          fullText += textChunk;
-          writeSseEvent(res, 'result_delta', { chunk: textChunk });
+          const separated = thinkTagSplitter.process(textChunk);
+          if (separated.thinkingText) {
+            writeSseEvent(res, 'thinking_delta', { chunk: separated.thinkingText });
+          }
+          if (separated.resultText) {
+            fullText += separated.resultText;
+            writeSseEvent(res, 'result_delta', { chunk: separated.resultText });
+          }
         }
       });
 
@@ -469,10 +544,25 @@ async function streamOpenRouterToSse ({ res, prompt, imageDataUrl }) {
 
       const textChunk = normalizeDeltaText(delta.content);
       if (textChunk) {
-        fullText += textChunk;
-        writeSseEvent(res, 'result_delta', { chunk: textChunk });
+        const separated = thinkTagSplitter.process(textChunk);
+        if (separated.thinkingText) {
+          writeSseEvent(res, 'thinking_delta', { chunk: separated.thinkingText });
+        }
+        if (separated.resultText) {
+          fullText += separated.resultText;
+          writeSseEvent(res, 'result_delta', { chunk: separated.resultText });
+        }
       }
     });
+  }
+
+  const tail = thinkTagSplitter.flushRemainder();
+  if (tail.thinkingText) {
+    writeSseEvent(res, 'thinking_delta', { chunk: tail.thinkingText });
+  }
+  if (tail.resultText) {
+    fullText += tail.resultText;
+    writeSseEvent(res, 'result_delta', { chunk: tail.resultText });
   }
 
   const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(fullText));

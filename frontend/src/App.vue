@@ -83,7 +83,7 @@
         </p>
 
         <section
-          v-if="streamStatusMessages.length || streamThinking || streamResultPreview"
+          v-if="streamStatusMessages.length || streamThinking || streamResultPreview || finalScadCode"
           class="subpanel stream-panel"
         >
           <div class="subpanel-header">
@@ -108,6 +108,11 @@
           <div v-if="streamResultPreview" class="stream-section">
             <h3>结果流</h3>
             <pre class="stream-block">{{ streamResultPreview }}</pre>
+          </div>
+
+          <div v-if="finalScadCode" class="stream-section">
+            <h3>最终 OpenSCAD（用于生成）</h3>
+            <pre class="stream-block">{{ finalScadCode }}</pre>
           </div>
         </section>
 
@@ -239,6 +244,7 @@ const selectedImageName = ref('');
 const streamStatusMessages = ref<string[]>([]);
 const streamThinking = ref('');
 const streamResultPreview = ref('');
+const finalScadCode = ref('');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -299,6 +305,7 @@ async function generateModel() {
   streamStatusMessages.value = ['请求已发送，等待后端响应...'];
   streamThinking.value = '';
   streamResultPreview.value = '';
+  finalScadCode.value = '';
 
   try {
     const response = await fetch('/api/generate/stream', {
@@ -397,7 +404,7 @@ function handleSseBlock(block: string) {
     if (typeof donePayload.code === 'string') {
       const cleanCode = sanitizeOpenScadCode(donePayload.code);
       code.value = cleanCode;
-      streamResultPreview.value = cleanCode;
+      finalScadCode.value = cleanCode;
     }
     if (typeof donePayload.prompt === 'string') {
       lastPrompt.value = donePayload.prompt;

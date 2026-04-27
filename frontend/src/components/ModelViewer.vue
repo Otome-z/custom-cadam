@@ -202,10 +202,10 @@ function createWovenTubeGroup(): THREE.Group {
     const cx = (i * warpSpacing) / sqrt2;
     const cy = (-i * warpSpacing) / sqrt2;
     const end = (warpLength * sqrt2);
-    const curve = new THREE.LineCurve3(
+    const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(cx, cy, 0),
       new THREE.Vector3(cx + end / sqrt2, cy - end / sqrt2, 0),
-    );
+    ], false, 'centripetal');
     const geometry = new THREE.TubeGeometry(curve, 32, radius, radialSegments, false);
     const material = buildMaterial(i % 2 === 0 ? '#8c9b84' : '#d9ddd0');
     const mesh = new THREE.Mesh(geometry, material);

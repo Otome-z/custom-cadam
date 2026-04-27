@@ -8,8 +8,8 @@
         <div class="eyebrow">sub-cadam</div>
         <h1>参数化文生模型最小闭环</h1>
         <p class="intro">
-          这里保留一条最短链路：输入文案，后端请求 OpenRouter 生成
-          OpenSCAD，前端 worker 编译 STL，并在右侧直接预览。
+          这里保留一条最短链路：输入文案（可附带参考图片），后端请求 OpenRouter
+          生成 OpenSCAD，前端 worker 编译 STL，并在右侧直接预览。
         </p>
 
         <form class="prompt-form" @submit.prevent="generateModel">
@@ -21,6 +21,29 @@
             rows="8"
             placeholder="例如：生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。"
           />
+          <div class="upload-row">
+            <label class="ghost-button upload-button" for="reference-image">
+              {{ selectedImageName ? '更换参考图' : '上传参考图（可选）' }}
+            </label>
+            <input
+              id="reference-image"
+              class="file-input"
+              type="file"
+              accept="image/*"
+              @change="onImagePicked"
+            />
+            <span v-if="selectedImageName" class="image-name">
+              {{ selectedImageName }}
+            </span>
+            <button
+              v-if="selectedImageName"
+              class="ghost-button"
+              type="button"
+              @click="clearImage"
+            >
+              清空图片
+            </button>
+          </div>
 
           <div class="actions">
             <button class="primary-button" type="submit" :disabled="isGenerating">
@@ -54,10 +77,76 @@
           </div>
         </form>
 
+        <section class="subpanel">
+          <div class="subpanel-header">
+            <h2>直接输入 OpenSCAD</h2>
+            <span>无需调用大模型</span>
+          </div>
+          <textarea
+            v-model="directOpenScad"
+            class="prompt-input direct-code-input"
+            rows="8"
+            placeholder="粘贴 OpenSCAD 代码，点击“直接生成模型”即可在右侧预览。"
+          />
+          <div class="actions">
+            <button class="primary-button" type="button" @click="applyDirectOpenScad">
+              直接生成模型
+            </button>
+            <button
+              v-if="directOpenScad"
+              class="ghost-button"
+              type="button"
+              @click="clearDirectOpenScad"
+            >
+              清空代码
+            </button>
+          </div>
+        </section>
+
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
         <p v-else-if="lastPrompt" class="status">
           最近一次请求：{{ lastPrompt }}
         </p>
+
+        <section
+          v-if="streamStatusMessages.length || streamThinking || streamResultPreview"
+          class="subpanel stream-panel"
+        >
+          <div class="subpanel-header">
+            <h2>生成流</h2>
+            <span>{{ isGenerating ? 'streaming' : 'completed' }}</span>
+          </div>
+
+          <div v-if="streamStatusMessages.length" class="stream-section">
+            <h3>状态</h3>
+            <ul class="stream-list">
+              <li v-for="(message, index) in streamStatusMessages" :key="`${index}-${message}`">
+                {{ message }}
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="streamThinking" class="stream-section thinking-section">
+            <div class="thinking-header">
+              <h3>思考</h3>
+              <button
+                class="ghost-button thinking-toggle"
+                type="button"
+                @click="toggleThinking"
+              >
+                {{ thinkingExpanded ? '隐藏思考' : '显示思考' }}
+              </button>
+            </div>
+            <pre v-if="thinkingExpanded" class="stream-block thinking-block">
+              {{ streamThinking }}
+            </pre>
+          </div>
+
+          <div v-if="streamResultPreview" class="stream-section result-section">
+            <h3>最终结果</h3>
+            <pre class="stream-block result-block">{{ streamResultPreview }}</pre>
+          </div>
+        </section>
 
         <section v-if="editableParameters.length" class="subpanel">
           <div class="subpanel-header">
@@ -170,10 +259,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
-import type { GenerateResponse, Parameter } from '@/types';
+import type { GenerateRequest, GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
-  '生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。',
+  '根据参考图图片生成',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);
@@ -182,6 +271,13 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
+const referenceImageDataUrl = ref('');
+const selectedImageName = ref('');
+const streamStatusMessages = ref<string[]>([]);
+const streamThinking = ref('');
+const streamResultPreview = ref('');
+const directOpenScad = ref('');
+const thinkingExpanded = ref(false);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -239,30 +335,192 @@ async function generateModel() {
   isGenerating.value = true;
   requestError.value = '';
   copied.value = false;
+  streamStatusMessages.value = ['请求已发送，等待后端响应...'];
+  streamThinking.value = '';
+  streamResultPreview.value = '';
+  thinkingExpanded.value = false;
 
   try {
-    const response = await fetch('/api/generate', {
+    const response = await fetch('/api/generate/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
+      body: JSON.stringify(<GenerateRequest>{
         prompt: trimmedPrompt,
+        imageDataUrl: referenceImageDataUrl.value || undefined,
       }),
     });
 
-    const payload = (await response.json()) as GenerateResponse & { error?: string };
     if (!response.ok) {
-      throw new Error(payload.error || '生成请求失败。');
+      throw new Error('流式生成请求失败。');
     }
 
-    code.value = payload.code;
-    lastPrompt.value = payload.prompt;
+    if (!response.body) {
+      throw new Error('浏览器不支持流式响应。');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      let splitIndex = buffer.indexOf('\n\n');
+
+      while (splitIndex !== -1) {
+        const block = buffer.slice(0, splitIndex);
+        buffer = buffer.slice(splitIndex + 2);
+        handleSseBlock(block);
+        splitIndex = buffer.indexOf('\n\n');
+      }
+    }
+
+    if (buffer.trim()) {
+      handleSseBlock(buffer);
+    }
   } catch (error) {
     requestError.value =
       error instanceof Error ? error.message : '生成请求失败。';
   } finally {
     isGenerating.value = false;
+  }
+}
+
+function handleSseBlock(block: string) {
+  const lines = block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return;
+  }
+
+  const eventLine = lines.find((line) => line.startsWith('event:'));
+  const dataLine = lines.find((line) => line.startsWith('data:'));
+  if (!eventLine || !dataLine) {
+    return;
+  }
+
+  const event = eventLine.replace(/^event:\s*/, '');
+  const payloadText = dataLine.replace(/^data:\s*/, '');
+  let payload: Record<string, unknown> = {};
+
+  try {
+    payload = JSON.parse(payloadText);
+  } catch {
+    return;
+  }
+
+  if (event === 'status' && typeof payload.message === 'string') {
+    streamStatusMessages.value.push(payload.message);
+    return;
+  }
+
+  if (event === 'thinking_delta' && typeof payload.chunk === 'string') {
+    streamThinking.value += payload.chunk;
+    return;
+  }
+
+  if (event === 'result_delta' && typeof payload.chunk === 'string') {
+    streamResultPreview.value += payload.chunk;
+    return;
+  }
+
+  if (event === 'done') {
+    const donePayload = payload as GenerateResponse;
+    if (typeof donePayload.code === 'string') {
+      const cleanCode = sanitizeOpenScadCode(donePayload.code);
+      code.value = cleanCode;
+    }
+    if (typeof donePayload.prompt === 'string') {
+      lastPrompt.value = donePayload.prompt;
+    }
+    streamStatusMessages.value.push('生成完成。');
+    return;
+  }
+
+  if (event === 'error' && typeof payload.error === 'string') {
+    requestError.value = payload.error;
+    streamStatusMessages.value.push('生成失败。');
+  }
+}
+
+function sanitizeOpenScadCode(rawCode: string) {
+  return rawCode
+    .replace(/^```(?:openscad|scad)?\s*\n?/i, '')
+    .replace(/\n?```$/i, '')
+    .replace(/```(?:openscad|scad)?/gi, '')
+    .replace(/```/g, '')
+    .replace(/\bbreak\s*;/g, 'echo("break_removed_for_openscad");')
+    .replace(/\bcontinue\s*;/g, 'echo("continue_removed_for_openscad");')
+    .trim();
+}
+
+function applyDirectOpenScad() {
+  const trimmed = sanitizeOpenScadCode(directOpenScad.value);
+  if (!trimmed) {
+    requestError.value = '请先输入 OpenSCAD 代码。';
+    return;
+  }
+
+  code.value = trimmed;
+  lastPrompt.value = '直接 OpenSCAD 输入';
+  streamStatusMessages.value = ['已跳过大模型，直接使用 OpenSCAD 代码生成。'];
+  streamThinking.value = '';
+  streamResultPreview.value = trimmed;
+  requestError.value = '';
+}
+
+function clearDirectOpenScad() {
+  directOpenScad.value = '';
+}
+
+function toggleThinking() {
+  thinkingExpanded.value = !thinkingExpanded.value;
+}
+
+function onImagePicked(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  if (!file.type.startsWith('image/')) {
+    requestError.value = '仅支持上传图片文件。';
+    clearImage();
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result !== 'string') {
+      requestError.value = '图片读取失败，请重试。';
+      return;
+    }
+
+    referenceImageDataUrl.value = reader.result;
+    selectedImageName.value = file.name;
+    requestError.value = '';
+  };
+  reader.onerror = () => {
+    requestError.value = '图片读取失败，请重试。';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearImage() {
+  referenceImageDataUrl.value = '';
+  selectedImageName.value = '';
+  const input = document.getElementById('reference-image') as HTMLInputElement | null;
+  if (input) {
+    input.value = '';
   }
 }
 

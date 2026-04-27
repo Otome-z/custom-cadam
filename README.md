@@ -2,9 +2,11 @@
 
 一个独立的最小参数化 CAD 项目，流程只有一条主链路：
 
-`输入文案 -> Node 后端 -> OpenRouter -> OpenSCAD 代码 -> 浏览器 worker -> 3D 预览`
+`输入文案/参考图 -> Node 后端 -> 千问(DashScope) -> OpenSCAD 代码 -> 浏览器 worker -> 3D 预览`
 
 这个项目不包含登录、额度、Supabase 等能力，只保留参数化生成和预览。
+其中参考图是可选输入：可上传图片辅助大模型理解目标造型。
+你也可以跳过大模型，直接粘贴 OpenSCAD 代码，在前端 worker 中直接编译并预览。
 
 ## 目录
 
@@ -14,10 +16,12 @@
 ## 配置
 
 1. 在 `sub-cadam` 目录下复制 `.env.example` 为 `.env`
-2. 填好下面两个值：
+2. 填好下面几个值：
 
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`
+- `QIANWEN_API_KEY`
+- `QIANWEN_MODEL`
+- `PROJECT_SITE_URL`
+- `PROJECT_APP_NAME`
 
 ## 本地开发
 
@@ -44,4 +48,3 @@ npm run start
 ```
 
 构建后的前端会输出到 `backend/public`，Node 服务会直接托管静态页面和 `/api/generate`。
-

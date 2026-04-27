@@ -41,3 +41,7 @@ export type GenerateResponse = {
   code: string;
 };
 
+export type GenerateRequest = {
+  prompt: string;
+  imageDataUrl?: string;
+};

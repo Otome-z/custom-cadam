@@ -48,14 +48,6 @@
             <button class="primary-button" type="submit" :disabled="isGenerating">
               {{ isGenerating ? '生成中...' : '生成模型' }}
             </button>
-            <select
-              v-model="selectedProvider"
-              class="parameter-input provider-select"
-              :disabled="isGenerating"
-            >
-              <option value="qianwen">千问（Qwen）</option>
-              <option value="deepseek">DeepSeek v4</option>
-            </select>
             <button v-if="code" class="ghost-button" type="button" @click="copyCode">
               {{ copied ? '已复制代码' : '复制 OpenSCAD' }}
             </button>
@@ -186,7 +178,6 @@ const isGenerating = ref(false);
 const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
-const selectedProvider = ref<'qianwen' | 'deepseek'>('qianwen');
 const thinkingText = ref('');
 const showThinking = ref(false);
 const imageDataUrl = ref('');
@@ -247,7 +238,7 @@ async function generateModelStream() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: trimmedPrompt,
-        provider: selectedProvider.value,
+        provider: 'qianwen',
         imageDataUrl: imageDataUrl.value || undefined,
       }),
     });

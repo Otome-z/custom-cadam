@@ -37,9 +37,6 @@ const QIANWEN_MODEL =
   || 'qwen-plus';
 const QIANWEN_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4';
-const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -154,25 +151,10 @@ function readRequestBody (req) {
 }
 
 function normalizeProvider(provider) {
-  if (provider === 'deepseek') {
-    return 'deepseek';
-  }
   return 'qianwen';
 }
 
 function resolveProviderConfig(provider) {
-  const normalized = normalizeProvider(provider);
-
-  if (normalized === 'deepseek') {
-    return {
-      name: 'DeepSeek',
-      url: DEEPSEEK_URL,
-      apiKey: DEEPSEEK_API_KEY,
-      model: DEEPSEEK_MODEL,
-      headers: {},
-    };
-  }
-
   return {
     name: 'Qianwen',
     url: QIANWEN_URL,
@@ -196,16 +178,10 @@ async function requestModel (
   const config = resolveProviderConfig(provider);
 
   if (!config.apiKey) {
-    if (normalizeProvider(provider) === 'deepseek') {
-      throw new Error('Missing DEEPSEEK_API_KEY in sub-cadam/.env');
-    }
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
   if (!config.model) {
-    if (normalizeProvider(provider) === 'deepseek') {
-      throw new Error('Missing DEEPSEEK_MODEL in sub-cadam/.env');
-    }
     throw new Error('Missing QIANWEN_MODEL in sub-cadam/.env');
   }
 
@@ -244,9 +220,6 @@ async function requestModelStream (
   const config = resolveProviderConfig(provider);
 
   if (!config.apiKey) {
-    if (normalizeProvider(provider) === 'deepseek') {
-      throw new Error('Missing DEEPSEEK_API_KEY in sub-cadam/.env');
-    }
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 

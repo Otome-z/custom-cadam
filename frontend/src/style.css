@@ -177,6 +177,13 @@ h2 {
   resize: vertical;
 }
 
+.direct-code-input {
+  min-height: 220px;
+  margin-top: 12px;
+  font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+  font-size: 13px;
+}
+
 .upload-row {
   margin-top: 12px;
   display: flex;

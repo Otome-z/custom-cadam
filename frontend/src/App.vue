@@ -77,6 +77,32 @@
           </div>
         </form>
 
+        <section class="subpanel">
+          <div class="subpanel-header">
+            <h2>直接输入 OpenSCAD</h2>
+            <span>无需调用大模型</span>
+          </div>
+          <textarea
+            v-model="directOpenScad"
+            class="prompt-input direct-code-input"
+            rows="8"
+            placeholder="粘贴 OpenSCAD 代码，点击“直接生成模型”即可在右侧预览。"
+          />
+          <div class="actions">
+            <button class="primary-button" type="button" @click="applyDirectOpenScad">
+              直接生成模型
+            </button>
+            <button
+              v-if="directOpenScad"
+              class="ghost-button"
+              type="button"
+              @click="clearDirectOpenScad"
+            >
+              清空代码
+            </button>
+          </div>
+        </section>
+
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
         <p v-else-if="lastPrompt" class="status">
           最近一次请求：{{ lastPrompt }}
@@ -245,6 +271,7 @@ const streamStatusMessages = ref<string[]>([]);
 const streamThinking = ref('');
 const streamResultPreview = ref('');
 const finalScadCode = ref('');
+const directOpenScad = ref('');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -426,6 +453,26 @@ function sanitizeOpenScadCode(rawCode: string) {
     .replace(/```(?:openscad|scad)?/gi, '')
     .replace(/```/g, '')
     .trim();
+}
+
+function applyDirectOpenScad() {
+  const trimmed = sanitizeOpenScadCode(directOpenScad.value);
+  if (!trimmed) {
+    requestError.value = '请先输入 OpenSCAD 代码。';
+    return;
+  }
+
+  code.value = trimmed;
+  finalScadCode.value = trimmed;
+  lastPrompt.value = '直接 OpenSCAD 输入';
+  streamStatusMessages.value = ['已跳过大模型，直接使用 OpenSCAD 代码生成。'];
+  streamThinking.value = '';
+  streamResultPreview.value = trimmed;
+  requestError.value = '';
+}
+
+function clearDirectOpenScad() {
+  directOpenScad.value = '';
 }
 
 function onImagePicked(event: Event) {

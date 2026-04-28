@@ -333,7 +333,24 @@ async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
 
     const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
     const payload = extractJsonPayload(rawText);
-    return normalizeCatalogModel(payload);
+    const normalized = normalizeCatalogModel(payload);
+    console.log('[catalog] raw model text:', rawText);
+    console.log('[catalog] extracted payload:', payload);
+    console.log('[catalog] normalized model:', normalized);
+    if (normalized) {
+      return normalized;
+    }
+
+    console.warn('[catalog] normalize failed, will try repair step before fallback');
+    const repaired = await repairCatalogModelSpec({
+      prompt,
+      provider,
+      imageDataUrl,
+      rawText,
+      payload,
+    });
+    console.log('[catalog] repaired model:', repaired);
+    return repaired;
   } catch (error) {
     console.warn('[sub-cadam] Catalog inference failed:', error);
     return null;
@@ -366,12 +383,36 @@ async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta)
   });
 
   const payload = extractJsonPayload(resultText);
-  return normalizeCatalogModel(payload);
+  const normalized = normalizeCatalogModel(payload);
+  console.log('[catalog] raw model text:', resultText);
+  console.log('[catalog] extracted payload:', payload);
+  console.log('[catalog] normalized model:', normalized);
+  if (normalized) {
+    return normalized;
+  }
+
+  console.warn('[catalog] normalize failed, will try repair step before fallback');
+  const repaired = await repairCatalogModelSpec({
+    prompt,
+    provider,
+    imageDataUrl,
+    rawText: resultText,
+    payload,
+  });
+  console.log('[catalog] repaired model:', repaired);
+  return repaired;
 }
 
 async function generateOpenScad (prompt, provider) {
   const catalogModelSpec = await inferCatalogModel(prompt, provider);
-  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt, { hasImage: false });
+  if (!catalogModelSpec) {
+    console.warn('[catalog] using fallback model:', {
+      hasImage: false,
+      prompt,
+      fallbackModelType: modelSpec?.modelType,
+    });
+  }
   const code = buildOpenScadFromModelSpec(modelSpec);
 
   if (!code) {
@@ -391,7 +432,14 @@ async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) 
     imageDataUrl,
     onDelta,
   );
-  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt, { hasImage: Boolean(imageDataUrl) });
+  if (!catalogModelSpec) {
+    console.warn('[catalog] using fallback model:', {
+      hasImage: Boolean(imageDataUrl),
+      prompt,
+      fallbackModelType: modelSpec?.modelType,
+    });
+  }
   const code = buildOpenScadFromModelSpec(modelSpec);
 
   if (!code) {
@@ -402,6 +450,76 @@ async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) 
     code,
     modelSpec,
   };
+}
+
+async function repairCatalogModelSpec({
+  prompt,
+  provider,
+  imageDataUrl = '',
+  rawText = '',
+  payload,
+}) {
+  try {
+    const repairPrompt = `You previously attempted to generate a yarn model spec from an image and prompt, but the output was invalid or unsupported.
+
+Repair the result and return valid JSON only.
+
+Important:
+- If the image shows multiple independent yarn paths, output modelType = "yarn_path_collection".
+- If the image shows vertical straight strands and horizontal folded/wavy/interlaced strands, output yarn_path_collection.
+- Do not output yarn_sheet for this kind of image.
+- Do not output woven_yarn_sheet unless the image is a globally regular woven sheet with one shared parameter set.
+- Each visible yarn path must be one line item in lines[].
+- Use supported line types only: straight, polyline, smoothPolyline, sine, bezier.
+- Every point must be [x, y, z].
+- lines must be a non-empty array if visible line paths exist.
+- globalDefaults must exist.
+- Return JSON only. No markdown. No explanation.
+
+Original user prompt:
+${prompt}
+
+Invalid previous model output:
+${rawText}
+
+Extracted payload:
+${JSON.stringify(payload)}
+
+Return repaired JSON only.`;
+
+    const data = await requestModel({
+      provider,
+      maxTokens: 1200,
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: MODEL_SPEC_SYSTEM_PROMPT,
+        },
+        {
+          role: 'user',
+          content: buildUserContent(repairPrompt, imageDataUrl),
+        },
+      ],
+    });
+
+    const repairedText = extractMessageText(data?.choices?.[0]?.message?.content);
+    const repairedPayload = extractJsonPayload(repairedText);
+    const repairedNormalized = normalizeCatalogModel(repairedPayload);
+    console.log('[catalog] repair raw text:', repairedText);
+    console.log('[catalog] repair payload:', repairedPayload);
+    console.log('[catalog] repair normalized:', repairedNormalized);
+    if (repairedNormalized) {
+      return {
+        ...repairedNormalized,
+        source: 'catalog_repaired',
+      };
+    }
+    return null;
+  } catch (error) {
+    console.warn('[catalog] repair failed:', error);
+    return null;
+  }
 }
 
 function sendSseEvent(res, event, payload) {

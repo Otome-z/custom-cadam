@@ -309,26 +309,28 @@ ${serializeCatalogForPrompt()}
 Rules:
 - Always map the user request to one of the supported model types.
 - Do not output custom_scad.
-- If the input includes an image, prioritize extracting visible yarn/line center paths and output yarn_path_collection by default.
-- Do not classify an entire image as one global woven model unless user explicitly requests a globally regular woven sheet.
-- For yarn_path_collection, each visible yarn/line must be one item in lines; do not merge multiple lines into one global parameter set.
-- Do not invent line data or numeric defaults that are not visible/inferable from input.
-- If lines are not identifiable from the image, return yarn_path_collection with an empty lines array instead of fabricating example lines.
+- If the input includes an image, first extract visible yarn centerlines / line paths.
+- If an image contains multiple distinct yarn paths, output modelType = "yarn_path_collection".
+- If an image contains vertical straight strands and horizontal folded / wavy / interlaced strands, MUST output yarn_path_collection.
+- Do not choose yarn_sheet when image contains both straight vertical yarns and folded / wavy / interlaced horizontal yarns.
+- Do not choose woven_yarn_sheet unless user explicitly requests a globally regular woven sheet with one shared parameter set.
+- If ambiguous between global sheet model and multi-line path model, prefer yarn_path_collection.
+- For yarn_path_collection, each visible yarn path must be one item in lines[].
+- Do not merge multiple yarn paths into global parameters.
+- globalDefaults are defaults only. Each line can override yarnDiameter, radialSegments, pathSegments, color, amplitude, period, cornerRadius.
 - Choose line type per line:
   - straight: horizontal / vertical / diagonal straight line
   - polyline: multi-segment sharp-corner piecewise straight path
   - smoothPolyline: multi-segment path with rounded corners / smooth turning
   - sine: continuous wave-like line
   - bezier: arbitrary smooth curve
-- For a P0->P1->P2->P3 turning path (e.g. one horizontal segment, then turns, then horizontal), output a single smoothPolyline with points including at least P0,P1,P2,P3.
-- If an image has multiple distinct yarns/lines, output multiple entries in lines.
-- globalDefaults are defaults only; each line may override yarnDiameter, radialSegments, pathSegments, color, amplitude, period, cornerRadius.
-- Only choose woven_yarn_sheet when user explicitly asks for a whole regular woven surface/grid with uniform warp/weft counts, uniform spacing, and uniform wave period.
-- If user explicitly says overall regular woven sheet with unified warp/weft quantity/spacing/period, woven_yarn_sheet is allowed.
-- For local path sketches / shoe upper texture lines / yarn routing / polylines / wave lines, prefer yarn_path_collection.
+- For a path like P0----P1 then diagonal turn then P2----P3, output ONE smoothPolyline with points [P0,P1,P2,P3], not multiple lines.
+- For a highlighted yellow strand, output a separate line with yellow color such as "#f5e642".
+- If image resembles technical yarn diagram / shoe upper texture path / yarn routing / wave-line / polyline / local interlaced path, prefer yarn_path_collection.
+- Image-specific guidance: when the reference image has many vertical straight yarns, horizontal folded or wavy yarns, paired horizontal interlaced strands, and one highlighted yellow strand, output yarn_path_collection.
 - Requests for parallel yarn rows, yarn surfaces made from side-by-side strands, or simple bundles should map to straight_yarn_bundle.
-- Requests mentioning sheet/plane/fabric-like layer should map to yarn_sheet.
-- Requests mentioning woven cloth, warp/weft, interlaced wave yarns, 经纬编织, or sinusoidal weft should map to woven_yarn_sheet.
+- Only choose yarn_sheet for simple rows of mostly parallel straight yarns with no obvious independent path variation.
+- Only choose woven_yarn_sheet for regular full woven grids where warp/weft counts, spacing, and wave period can be shared globally.
 - For woven_yarn_sheet, set amplitude to 0 unless the user (or reference image) clearly indicates sinusoidal/wavy weft paths.
 - Requests for twisted bundles or rope-like spirals should map to twisted_yarn_bundle.
 - Requests for a single bent yarn should map to curved_yarn_path.
@@ -393,6 +395,10 @@ export function normalizeCatalogModel(payload) {
       .map((line, index) => normalizeLineSpec(line, index, globalDefaults))
       .filter(Boolean);
 
+    if (lines.length === 0) {
+      return null;
+    }
+
     return {
       modelType,
       displayName: entry.displayName,
@@ -426,11 +432,18 @@ export function normalizeCatalogModel(payload) {
   };
 }
 
-export function fallbackCatalogModel(promptText = '') {
+export function fallbackCatalogModel(promptText = '', options = {}) {
   const prompt = promptText.toLowerCase();
+  const hasImage = Boolean(options?.hasImage);
   let modelType = 'straight_yarn_bundle';
 
-  const explicitWovenSheet = /(规则经纬|规则编织|整片织物|整体织物|统一间距|统一波浪周期|统一周期|uniform\s+(warp|weft|spacing|period)|regular\s+(woven|weave|warp|weft|grid))/i.test(promptText);
+  const explicitGlobalSheet = /(整片织物|整体织物|规则编织面|经纬网格|统一间距|统一周期|uniform\s+warp|uniform\s+weft|regular\s+woven\s+sheet|global\s+sheet)/i.test(promptText);
+  const lineHint = /(折线|波浪线|线条|路径|纹路|曲线|\bp0\b|\bp1\b|\bp2\b|\bp3\b|path|line|polyline|wave|route)/i.test(promptText);
+  const genericImagePrompt = /(根据图片生成模型|按图片生成|参考图片生成模型|generate from image)/i.test(promptText);
+
+  if (hasImage && (!explicitGlobalSheet || lineHint || genericImagePrompt)) {
+    return buildFallbackYarnPathCollection();
+  }
 
   if (/(braid|plait|辫)/.test(prompt)) {
     modelType = 'braided_yarn';
@@ -526,6 +539,7 @@ function formatNumber(value) {
 }
 
 const LINE_TYPES = new Set(['straight', 'polyline', 'smoothPolyline', 'sine', 'bezier']);
+const DEFAULT_LINE_COLOR = '#d9ddd0';
 
 function normalizeGlobalDefaults(rawDefaults) {
   const defaults = rawDefaults && typeof rawDefaults === 'object' && !Array.isArray(rawDefaults) ? rawDefaults : {};
@@ -533,9 +547,7 @@ function normalizeGlobalDefaults(rawDefaults) {
   setIfNumber(normalized, 'yarnDiameter', defaults.yarnDiameter, 0.1, 50, false);
   setIfNumber(normalized, 'radialSegments', defaults.radialSegments, 12, 256, true);
   setIfNumber(normalized, 'pathSegments', defaults.pathSegments, 2, 512, true);
-  if (typeof defaults.color === 'string' && defaults.color.trim()) {
-    normalized.color = defaults.color.trim();
-  }
+  normalized.color = normalizeHexColor(defaults.color) || DEFAULT_LINE_COLOR;
   return normalized;
 }
 
@@ -549,7 +561,7 @@ function normalizeLineSpec(rawLine, index, globalDefaults) {
     return null;
   }
 
-  const normalizedType = nonEmptyString(rawLine.type);
+  const normalizedType = normalizeLineType(rawLine.type);
   const type = LINE_TYPES.has(normalizedType) ? normalizedType : 'smoothPolyline';
   const normalizedLine = {
     id: nonEmptyString(rawLine.id) || `line_${index + 1}`,
@@ -565,10 +577,7 @@ function normalizeLineSpec(rawLine, index, globalDefaults) {
   setLineNumber(normalizedLine, 'period', rawLine.period, globalDefaults.period, 0.1, 1000, false);
   setLineNumber(normalizedLine, 'cornerRadius', rawLine.cornerRadius, globalDefaults.cornerRadius, 0, 200, false);
 
-  const color = pickString(rawLine.color) || pickString(globalDefaults.color);
-  if (color) {
-    normalizedLine.color = color;
-  }
+  normalizedLine.color = normalizeHexColor(rawLine.color) || normalizeHexColor(globalDefaults.color) || DEFAULT_LINE_COLOR;
 
   return normalizedLine;
 }
@@ -647,9 +656,100 @@ function pickString(value) {
   return value.trim();
 }
 
+function normalizeLineType(value) {
+  const normalized = nonEmptyString(value).toLowerCase().replace(/[\s_-]+/g, '');
+  if (!normalized) {
+    return '';
+  }
+  if (normalized === 'smoothpolyline') {
+    return 'smoothPolyline';
+  }
+  if (normalized === 'polyline') {
+    return 'polyline';
+  }
+  if (normalized === 'straight') {
+    return 'straight';
+  }
+  if (normalized === 'sine' || normalized === 'wave' || normalized === 'wavy') {
+    return 'sine';
+  }
+  if (normalized === 'bezier') {
+    return 'bezier';
+  }
+  return '';
+}
+
+function normalizeHexColor(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed) ? trimmed : '';
+}
+
 function nonEmptyString(value) {
   if (typeof value !== 'string') {
     return '';
   }
   return value.trim();
+}
+
+function buildFallbackYarnPathCollection() {
+  return {
+    modelType: 'yarn_path_collection',
+    displayName: MODEL_CATALOG.yarn_path_collection.displayName,
+    description: MODEL_CATALOG.yarn_path_collection.description,
+    source: 'catalog_fallback',
+    summary: 'Fallback line-based yarn path model',
+    globalDefaults: {
+      yarnDiameter: 1,
+      radialSegments: 64,
+      pathSegments: 120,
+      color: DEFAULT_LINE_COLOR,
+    },
+    lines: [
+      {
+        id: 'vertical_1',
+        name: 'Vertical strand 1',
+        type: 'straight',
+        points: [[0, 0, 0], [0, 100, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 80,
+        color: DEFAULT_LINE_COLOR,
+      },
+      {
+        id: 'vertical_2',
+        name: 'Vertical strand 2',
+        type: 'straight',
+        points: [[10, 0, 0], [10, 100, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 80,
+        color: DEFAULT_LINE_COLOR,
+      },
+      {
+        id: 'horizontal_folded_1',
+        name: 'Horizontal folded strand 1',
+        type: 'smoothPolyline',
+        points: [[-20, 20, 0], [20, 20, 0], [30, 12, 0], [70, 12, 0], [80, 20, 0], [120, 20, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 120,
+        color: DEFAULT_LINE_COLOR,
+        cornerRadius: 4,
+      },
+      {
+        id: 'highlight_yellow',
+        name: 'Highlighted yellow strand',
+        type: 'smoothPolyline',
+        points: [[-20, 35, 0], [20, 35, 0], [30, 27, 0], [70, 27, 0], [80, 35, 0], [120, 35, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 120,
+        color: '#f5e642',
+        cornerRadius: 4,
+      },
+    ],
+  };
 }

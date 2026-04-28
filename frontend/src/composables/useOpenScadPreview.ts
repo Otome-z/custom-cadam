@@ -30,8 +30,13 @@ function normalizeWorkerError(response: WorkerResponseMessage): Error {
   return new Error(message);
 }
 
-function isWovenCatalogCode(source: string): boolean {
-  return source.includes('catalog_model: woven_yarn_sheet');
+const NATIVE_THREE_CATALOG_TAGS = [
+  'catalog_model: woven_yarn_sheet',
+  'catalog_model: yarn_path_collection',
+];
+
+function isNativeThreeCatalogCode(source: string): boolean {
+  return NATIVE_THREE_CATALOG_TAGS.some((tag) => source.includes(tag));
 }
 
 export function useOpenScadPreview(
@@ -63,7 +68,7 @@ export function useOpenScadPreview(
       return;
     }
 
-    if (isWovenCatalogCode(source)) {
+    if (isNativeThreeCatalogCode(source)) {
       activeRequestId = null;
       output.value = null;
       clearGeometry();

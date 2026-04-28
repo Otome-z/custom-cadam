@@ -179,11 +179,13 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import type { BufferGeometry, Material, Object3D } from 'three';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
 import type { Parameter } from '@/types';
 import { exportPreviewGeometry, type ExportFormat } from '@/utils/exportGeometry';
+import { createWovenTubeGroup } from '@/utils/wovenGeometry';
 
 type StreamDonePayload = {
   prompt: string;
@@ -225,6 +227,7 @@ const exportFormatOptions: Array<{ value: ExportFormat; label: string; hint: str
 const selectedExportHint = computed(
   () => exportFormatOptions.find((item) => item.value === selectedExportFormat.value)?.hint ?? '',
 );
+const hasWovenCatalogTag = computed(() => code.value.includes('catalog_model: woven_yarn_sheet'));
 
 const codeLineCount = computed(() => (code.value ? code.value.split(/\r?\n/).length : 0));
 
@@ -386,7 +389,8 @@ function setBooleanParameter(parameterName: string, event: Event) {
 }
 
 async function downloadExportedModel() {
-  if (!geometry.value) {
+  const exportSource = resolveExportSource();
+  if (!exportSource) {
     exportError.value = '当前没有可导出的几何体，请先生成模型。';
     return;
   }
@@ -395,7 +399,7 @@ async function downloadExportedModel() {
   exportError.value = '';
 
   try {
-    const { blob, extension } = await exportPreviewGeometry(geometry.value, selectedExportFormat.value);
+    const { blob, extension } = await exportPreviewGeometry(exportSource, selectedExportFormat.value);
     const modelName = `model-${new Date().toISOString().replace(/[:.]/g, '-')}`;
     const downloadUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -406,8 +410,39 @@ async function downloadExportedModel() {
   } catch (error) {
     exportError.value = error instanceof Error ? error.message : '导出失败，请重试。';
   } finally {
+    if (isDynamicExportSource(exportSource)) {
+      disposeExportObject(exportSource);
+    }
     isExporting.value = false;
   }
+}
+
+function resolveExportSource(): BufferGeometry | Object3D | null {
+  if (geometry.value) {
+    return geometry.value;
+  }
+
+  if (hasWovenCatalogTag.value) {
+    return createWovenTubeGroup(parameters.value);
+  }
+
+  return null;
+}
+
+function isDynamicExportSource(exportSource: BufferGeometry | Object3D): exportSource is Object3D {
+  return !geometry.value && hasWovenCatalogTag.value;
+}
+
+function disposeExportObject(object: Object3D) {
+  object.traverse((child) => {
+    const maybeMesh = child as { geometry?: { dispose?: () => void }; material?: Material | Material[] };
+    maybeMesh.geometry?.dispose?.();
+    if (Array.isArray(maybeMesh.material)) {
+      maybeMesh.material.forEach((material) => material.dispose());
+    } else {
+      maybeMesh.material?.dispose();
+    }
+  });
 }
 
 

@@ -1,4 +1,13 @@
 const MODEL_CATALOG = {
+  yarn_path_collection: {
+    displayName: 'Yarn Path Collection',
+    description: 'A line-based yarn model where each yarn path is an independent line spec.',
+    parameters: {},
+    buildCode: (params, modelSpec) => `// catalog_model: yarn_path_collection
+// This model is rendered by native three.js from modelSpec.lines.
+// line_count = ${Array.isArray(modelSpec?.lines) ? modelSpec.lines.length : 0};
+`,
+  },
   straight_yarn_bundle: {
     displayName: 'Straight Yarn Bundle',
     description: 'Parallel cylindrical yarn strands arranged side by side.',
@@ -300,6 +309,21 @@ ${serializeCatalogForPrompt()}
 Rules:
 - Always map the user request to one of the supported model types.
 - Do not output custom_scad.
+- If the input includes an image, prioritize extracting visible yarn/line center paths and output yarn_path_collection by default.
+- Do not classify an entire image as one global woven model unless user explicitly requests a globally regular woven sheet.
+- For yarn_path_collection, each visible yarn/line must be one item in lines; do not merge multiple lines into one global parameter set.
+- Choose line type per line:
+  - straight: horizontal / vertical / diagonal straight line
+  - polyline: multi-segment sharp-corner piecewise straight path
+  - smoothPolyline: multi-segment path with rounded corners / smooth turning
+  - sine: continuous wave-like line
+  - bezier: arbitrary smooth curve
+- For a P0->P1->P2->P3 turning path (e.g. one horizontal segment, then turns, then horizontal), output a single smoothPolyline with points including at least P0,P1,P2,P3.
+- If an image has multiple distinct yarns/lines, output multiple entries in lines.
+- globalDefaults are defaults only; each line may override yarnDiameter, radialSegments, pathSegments, color, amplitude, period, cornerRadius.
+- Only choose woven_yarn_sheet when user explicitly asks for a whole regular woven surface/grid with uniform warp/weft counts, uniform spacing, and uniform wave period.
+- If user explicitly says overall regular woven sheet with unified warp/weft quantity/spacing/period, woven_yarn_sheet is allowed.
+- For local path sketches / shoe upper texture lines / yarn routing / polylines / wave lines, prefer yarn_path_collection.
 - Requests for parallel yarn rows, yarn surfaces made from side-by-side strands, or simple bundles should map to straight_yarn_bundle.
 - Requests mentioning sheet/plane/fabric-like layer should map to yarn_sheet.
 - Requests mentioning woven cloth, warp/weft, interlaced wave yarns, 经纬编织, or sinusoidal weft should map to woven_yarn_sheet.
@@ -312,6 +336,34 @@ Rules:
 - Only include parameter names that belong to the chosen model type.
 
 Return shape:
+Line-based:
+{
+  "modelType": "yarn_path_collection",
+  "summary": "short plain-language summary",
+  "globalDefaults": {
+    "yarnDiameter": 1,
+    "radialSegments": 64,
+    "pathSegments": 80,
+    "color": "#d9ddd0"
+  },
+  "lines": [
+    {
+      "id": "line_1",
+      "name": "Line 1",
+      "type": "smoothPolyline",
+      "points": [[0, 0, 0], [50, 0, 0], [70, -20, 0], [120, -20, 0]],
+      "yarnDiameter": 1,
+      "radialSegments": 64,
+      "pathSegments": 80,
+      "color": "#d9ddd0",
+      "amplitude": 0,
+      "period": 8,
+      "cornerRadius": 4
+    }
+  ]
+}
+
+Legacy catalog model:
 {
   "modelType": "straight_yarn_bundle | yarn_sheet | woven_yarn_sheet | twisted_yarn_bundle | curved_yarn_path | braided_yarn",
   "summary": "short plain-language summary",
@@ -329,6 +381,32 @@ export function normalizeCatalogModel(payload) {
   const entry = MODEL_CATALOG[modelType];
   if (!entry) {
     return null;
+  }
+
+  if (modelType === 'yarn_path_collection') {
+    const rawLines = Array.isArray(payload.lines) ? payload.lines : null;
+    if (!rawLines || rawLines.length === 0) {
+      return null;
+    }
+
+    const globalDefaults = normalizeGlobalDefaults(payload.globalDefaults);
+    const lines = rawLines
+      .map((line, index) => normalizeLineSpec(line, index, globalDefaults))
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      return null;
+    }
+
+    return {
+      modelType,
+      displayName: entry.displayName,
+      description: entry.description,
+      source: 'catalog',
+      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined,
+      globalDefaults,
+      lines,
+    };
   }
 
   const rawParameters = payload.parameters && typeof payload.parameters === 'object' ? payload.parameters : {};
@@ -357,7 +435,12 @@ export function fallbackCatalogModel(promptText = '') {
   const prompt = promptText.toLowerCase();
   let modelType = 'straight_yarn_bundle';
 
-  if (/(braid|plait|辫)/.test(prompt)) {
+  const lineBasedHint = /(line|path|polyline|折线|波浪线|线条|路径|纹路|曲线|\bp0\b|\bp1\b|\bp2\b|\bp3\b)/i.test(promptText);
+  const explicitWovenSheet = /(规则经纬|规则编织|整片织物|整体织物|统一间距|统一波浪周期|统一周期|uniform\s+(warp|weft|spacing|period)|regular\s+(woven|weave|warp|weft|grid))/i.test(promptText);
+
+  if (lineBasedHint && !explicitWovenSheet) {
+    modelType = 'yarn_path_collection';
+  } else if (/(braid|plait|辫)/.test(prompt)) {
     modelType = 'braided_yarn';
   } else if (/(woven|weave|warp|weft|经|纬|波浪)/.test(prompt)) {
     modelType = 'woven_yarn_sheet';
@@ -370,6 +453,30 @@ export function fallbackCatalogModel(promptText = '') {
   }
 
   const entry = MODEL_CATALOG[modelType];
+  if (modelType === 'yarn_path_collection') {
+    const globalDefaults = normalizeGlobalDefaults({});
+    return {
+      modelType,
+      displayName: entry.displayName,
+      description: entry.description,
+      source: 'catalog_fallback',
+      summary: 'Fallback line-based yarn path collection',
+      globalDefaults,
+      lines: [
+        normalizeLineSpec(
+          {
+            id: 'line_1',
+            name: 'Line 1',
+            type: 'smoothPolyline',
+            points: [[0, 0, 0], [50, 0, 0], [70, -20, 0], [120, -20, 0]],
+          },
+          0,
+          globalDefaults,
+        ),
+      ].filter(Boolean),
+    };
+  }
+
   const parameters = Object.entries(entry.parameters).map(([name, schema]) => ({
     name,
     displayName: schema.displayName,
@@ -398,6 +505,10 @@ export function buildOpenScadFromModelSpec(modelSpec) {
   const entry = MODEL_CATALOG[modelSpec.modelType];
   if (!entry) {
     return null;
+  }
+
+  if (modelSpec.modelType === 'yarn_path_collection') {
+    return entry.buildCode({}, modelSpec);
   }
 
   const params = Object.fromEntries((Array.isArray(modelSpec.parameters) ? modelSpec.parameters : []).map((parameter) => [parameter.name, Number(parameter.value)]));
@@ -444,4 +555,107 @@ function roundNumber(value) {
 
 function formatNumber(value) {
   return roundNumber(value).toString();
+}
+
+const LINE_TYPES = new Set(['straight', 'polyline', 'smoothPolyline', 'sine', 'bezier']);
+const DEFAULT_LINE_COLOR = '#d9ddd0';
+
+function normalizeGlobalDefaults(rawDefaults) {
+  const defaults = rawDefaults && typeof rawDefaults === 'object' && !Array.isArray(rawDefaults) ? rawDefaults : {};
+  return {
+    yarnDiameter: clampNumber(defaults.yarnDiameter, 1, 0.1, 50),
+    radialSegments: clampInteger(defaults.radialSegments, 64, 12, 256),
+    pathSegments: clampInteger(defaults.pathSegments, 80, 2, 512),
+    color: normalizeColor(defaults.color, DEFAULT_LINE_COLOR),
+  };
+}
+
+function normalizeLineSpec(rawLine, index, globalDefaults) {
+  if (!rawLine || typeof rawLine !== 'object' || Array.isArray(rawLine)) {
+    return null;
+  }
+
+  const points = normalizeLinePoints(rawLine.points);
+  if (points.length < 2) {
+    return null;
+  }
+
+  const normalizedType = nonEmptyString(rawLine.type);
+  const type = LINE_TYPES.has(normalizedType) ? normalizedType : 'smoothPolyline';
+  return {
+    id: nonEmptyString(rawLine.id) || `line_${index + 1}`,
+    name: nonEmptyString(rawLine.name) || `Line ${index + 1}`,
+    type,
+    points,
+    yarnDiameter: clampNumber(rawLine.yarnDiameter, globalDefaults.yarnDiameter, 0.1, 50),
+    radialSegments: clampInteger(rawLine.radialSegments, globalDefaults.radialSegments, 12, 256),
+    pathSegments: clampInteger(rawLine.pathSegments, globalDefaults.pathSegments, 2, 512),
+    color: normalizeColor(rawLine.color, globalDefaults.color),
+    amplitude: clampNumber(rawLine.amplitude, 0, 0, 200),
+    period: clampNumber(rawLine.period, 8, 0.1, 1000),
+    cornerRadius: clampNumber(rawLine.cornerRadius, 4, 0, 200),
+  };
+}
+
+function normalizeLinePoints(rawPoints) {
+  if (!Array.isArray(rawPoints)) {
+    return [];
+  }
+
+  return rawPoints
+    .map((point) => {
+      if (!Array.isArray(point)) {
+        return null;
+      }
+
+      if (point.length >= 3) {
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        const z = Number(point[2]);
+        if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+          return [roundNumber(x), roundNumber(y), roundNumber(z)];
+        }
+        return null;
+      }
+
+      if (point.length >= 2) {
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          return [roundNumber(x), roundNumber(y), 0];
+        }
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function clampNumber(value, fallback, min, max) {
+  let next = Number(value);
+  if (!Number.isFinite(next)) {
+    next = Number(fallback);
+  }
+  if (!Number.isFinite(next)) {
+    next = min;
+  }
+  return roundNumber(Math.min(max, Math.max(min, next)));
+}
+
+function clampInteger(value, fallback, min, max) {
+  return Math.round(clampNumber(value, fallback, min, max));
+}
+
+function normalizeColor(value, fallback) {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return fallback;
+}
+
+function nonEmptyString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
 }

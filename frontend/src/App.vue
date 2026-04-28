@@ -85,7 +85,7 @@
             <button
               class="primary-button"
               type="button"
-              :disabled="!geometry || isExporting"
+              :disabled="(!geometry && !hasWovenCatalogTag) || isExporting"
               @click="downloadExportedModel"
             >
               {{ isExporting ? '导出中...' : '下载导出文件' }}
@@ -423,7 +423,10 @@ function resolveExportSource(): BufferGeometry | Object3D | null {
   }
 
   if (hasWovenCatalogTag.value) {
-    return createWovenTubeGroup(parameters.value);
+    return createWovenTubeGroup(parameters.value, {
+      mode: 'export',
+      format: selectedExportFormat.value,
+    });
   }
 
   return null;

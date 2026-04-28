@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 import type { Parameter } from '@/types';
+import type { ExportFormat } from '@/utils/exportGeometry';
+
+type WovenGeometryMode = 'preview' | 'export';
+
+type WovenGeometryOptions = {
+  mode?: WovenGeometryMode;
+  format?: ExportFormat;
+};
 
 function readNumericParameter(parameters: Parameter[], name: string, fallback: number): number {
   const parameter = parameters.find((item) => item.name === name);
@@ -8,8 +16,15 @@ function readNumericParameter(parameters: Parameter[], name: string, fallback: n
   return Number.isFinite(value) ? value : fallback;
 }
 
-export function createWovenTubeGroup(parameters: Parameter[]): THREE.Group {
-  const radialSegments = Math.max(12, Math.round(readNumericParameter(parameters, 'radial_segments', 128)));
+export function createWovenTubeGroup(parameters: Parameter[], options: WovenGeometryOptions = {}): THREE.Group {
+  const mode = options.mode ?? 'preview';
+  const isExportMode = mode === 'export';
+  const isBinaryStl = options.format === 'stl-binary';
+
+  const radialSegmentBase = Math.round(readNumericParameter(parameters, 'radial_segments', 128));
+  const radialSegments = isExportMode
+    ? Math.max(8, Math.min(isBinaryStl ? 12 : 16, Math.round(radialSegmentBase / 8)))
+    : Math.max(12, radialSegmentBase);
   const yarnDiameter = Math.max(0.2, readNumericParameter(parameters, 'yarn_diameter', 1));
   const radius = yarnDiameter / 2;
   const warpCount = Math.max(1, Math.round(readNumericParameter(parameters, 'warp_count', 10)));
@@ -20,10 +35,21 @@ export function createWovenTubeGroup(parameters: Parameter[]): THREE.Group {
   const weftLength = Math.max(1, readNumericParameter(parameters, 'weft_length', 100));
   const amplitude = Math.max(0, readNumericParameter(parameters, 'amplitude', yarnDiameter));
   const weftPeriod = Math.max(0.5, readNumericParameter(parameters, 'weft_period', 4 * warpSpacing));
-  const pathSegments = Math.max(64, Math.round(readNumericParameter(parameters, 'path_segments', 160)));
-  const adaptiveSegments = Math.max(pathSegments, Math.ceil(weftLength / Math.max(0.2, yarnDiameter * 0.25)));
-  const waveSampleSegments = Math.max(adaptiveSegments * 4, 256);
-  const waveTubeSegments = Math.max(adaptiveSegments * 6, 384);
+  const pathSegmentBase = Math.round(readNumericParameter(parameters, 'path_segments', 160));
+  const pathSegments = isExportMode
+    ? Math.max(24, Math.min(pathSegmentBase, isBinaryStl ? 40 : 56))
+    : Math.max(64, pathSegmentBase);
+  const adaptiveSegmentsRaw = Math.max(pathSegments, Math.ceil(weftLength / Math.max(0.2, yarnDiameter * 0.25)));
+  const adaptiveSegments = isExportMode
+    ? Math.max(48, Math.min(adaptiveSegmentsRaw, isBinaryStl ? 72 : 96))
+    : adaptiveSegmentsRaw;
+  const waveSampleSegments = isExportMode
+    ? Math.max(96, Math.min(adaptiveSegments * 2, isBinaryStl ? 144 : 192))
+    : Math.max(adaptiveSegments * 4, 256);
+  const waveTubeSegments = isExportMode
+    ? Math.max(96, Math.min(adaptiveSegments * 2, isBinaryStl ? 132 : 180))
+    : Math.max(adaptiveSegments * 6, 384);
+  const warpTubeSegments = isExportMode ? Math.max(12, Math.min(pathSegments, 24)) : 32;
   const sqrt2 = Math.sqrt(2);
 
   const group = new THREE.Group();
@@ -42,7 +68,7 @@ export function createWovenTubeGroup(parameters: Parameter[]): THREE.Group {
       new THREE.Vector3(cx, cy, 0),
       new THREE.Vector3(cx + end / sqrt2, cy - end / sqrt2, 0),
     ], false, 'centripetal');
-    const geometry = new THREE.TubeGeometry(curve, 32, radius, radialSegments, false);
+    const geometry = new THREE.TubeGeometry(curve, warpTubeSegments, radius, radialSegments, false);
     const material = buildMaterial(i % 2 === 0 ? '#8c9b84' : '#d9ddd0');
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;

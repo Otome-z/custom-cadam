@@ -312,6 +312,8 @@ Rules:
 - If the input includes an image, prioritize extracting visible yarn/line center paths and output yarn_path_collection by default.
 - Do not classify an entire image as one global woven model unless user explicitly requests a globally regular woven sheet.
 - For yarn_path_collection, each visible yarn/line must be one item in lines; do not merge multiple lines into one global parameter set.
+- Do not invent line data or numeric defaults that are not visible/inferable from input.
+- If lines are not identifiable from the image, return yarn_path_collection with an empty lines array instead of fabricating example lines.
 - Choose line type per line:
   - straight: horizontal / vertical / diagonal straight line
   - polyline: multi-segment sharp-corner piecewise straight path
@@ -341,10 +343,10 @@ Line-based:
   "modelType": "yarn_path_collection",
   "summary": "short plain-language summary",
   "globalDefaults": {
-    "yarnDiameter": 1,
-    "radialSegments": 64,
-    "pathSegments": 80,
-    "color": "#d9ddd0"
+    "yarnDiameter": <number_if_known>,
+    "radialSegments": <number_if_known>,
+    "pathSegments": <number_if_known>,
+    "color": "<color_if_known>"
   },
   "lines": [
     {
@@ -352,13 +354,13 @@ Line-based:
       "name": "Line 1",
       "type": "smoothPolyline",
       "points": [[0, 0, 0], [50, 0, 0], [70, -20, 0], [120, -20, 0]],
-      "yarnDiameter": 1,
-      "radialSegments": 64,
-      "pathSegments": 80,
-      "color": "#d9ddd0",
-      "amplitude": 0,
-      "period": 8,
-      "cornerRadius": 4
+      "yarnDiameter": <number_if_known>,
+      "radialSegments": <number_if_known>,
+      "pathSegments": <number_if_known>,
+      "color": "<color_if_known>",
+      "amplitude": <number_if_known>,
+      "period": <number_if_known>,
+      "cornerRadius": <number_if_known>
     }
   ]
 }
@@ -384,19 +386,12 @@ export function normalizeCatalogModel(payload) {
   }
 
   if (modelType === 'yarn_path_collection') {
-    const rawLines = Array.isArray(payload.lines) ? payload.lines : null;
-    if (!rawLines || rawLines.length === 0) {
-      return null;
-    }
+    const rawLines = Array.isArray(payload.lines) ? payload.lines : [];
 
     const globalDefaults = normalizeGlobalDefaults(payload.globalDefaults);
     const lines = rawLines
       .map((line, index) => normalizeLineSpec(line, index, globalDefaults))
       .filter(Boolean);
-
-    if (lines.length === 0) {
-      return null;
-    }
 
     return {
       modelType,
@@ -435,12 +430,9 @@ export function fallbackCatalogModel(promptText = '') {
   const prompt = promptText.toLowerCase();
   let modelType = 'straight_yarn_bundle';
 
-  const lineBasedHint = /(line|path|polyline|折线|波浪线|线条|路径|纹路|曲线|\bp0\b|\bp1\b|\bp2\b|\bp3\b)/i.test(promptText);
   const explicitWovenSheet = /(规则经纬|规则编织|整片织物|整体织物|统一间距|统一波浪周期|统一周期|uniform\s+(warp|weft|spacing|period)|regular\s+(woven|weave|warp|weft|grid))/i.test(promptText);
 
-  if (lineBasedHint && !explicitWovenSheet) {
-    modelType = 'yarn_path_collection';
-  } else if (/(braid|plait|辫)/.test(prompt)) {
+  if (/(braid|plait|辫)/.test(prompt)) {
     modelType = 'braided_yarn';
   } else if (/(woven|weave|warp|weft|经|纬|波浪)/.test(prompt)) {
     modelType = 'woven_yarn_sheet';
@@ -453,30 +445,6 @@ export function fallbackCatalogModel(promptText = '') {
   }
 
   const entry = MODEL_CATALOG[modelType];
-  if (modelType === 'yarn_path_collection') {
-    const globalDefaults = normalizeGlobalDefaults({});
-    return {
-      modelType,
-      displayName: entry.displayName,
-      description: entry.description,
-      source: 'catalog_fallback',
-      summary: 'Fallback line-based yarn path collection',
-      globalDefaults,
-      lines: [
-        normalizeLineSpec(
-          {
-            id: 'line_1',
-            name: 'Line 1',
-            type: 'smoothPolyline',
-            points: [[0, 0, 0], [50, 0, 0], [70, -20, 0], [120, -20, 0]],
-          },
-          0,
-          globalDefaults,
-        ),
-      ].filter(Boolean),
-    };
-  }
-
   const parameters = Object.entries(entry.parameters).map(([name, schema]) => ({
     name,
     displayName: schema.displayName,
@@ -558,16 +526,17 @@ function formatNumber(value) {
 }
 
 const LINE_TYPES = new Set(['straight', 'polyline', 'smoothPolyline', 'sine', 'bezier']);
-const DEFAULT_LINE_COLOR = '#d9ddd0';
 
 function normalizeGlobalDefaults(rawDefaults) {
   const defaults = rawDefaults && typeof rawDefaults === 'object' && !Array.isArray(rawDefaults) ? rawDefaults : {};
-  return {
-    yarnDiameter: clampNumber(defaults.yarnDiameter, 1, 0.1, 50),
-    radialSegments: clampInteger(defaults.radialSegments, 64, 12, 256),
-    pathSegments: clampInteger(defaults.pathSegments, 80, 2, 512),
-    color: normalizeColor(defaults.color, DEFAULT_LINE_COLOR),
-  };
+  const normalized = {};
+  setIfNumber(normalized, 'yarnDiameter', defaults.yarnDiameter, 0.1, 50, false);
+  setIfNumber(normalized, 'radialSegments', defaults.radialSegments, 12, 256, true);
+  setIfNumber(normalized, 'pathSegments', defaults.pathSegments, 2, 512, true);
+  if (typeof defaults.color === 'string' && defaults.color.trim()) {
+    normalized.color = defaults.color.trim();
+  }
+  return normalized;
 }
 
 function normalizeLineSpec(rawLine, index, globalDefaults) {
@@ -582,19 +551,26 @@ function normalizeLineSpec(rawLine, index, globalDefaults) {
 
   const normalizedType = nonEmptyString(rawLine.type);
   const type = LINE_TYPES.has(normalizedType) ? normalizedType : 'smoothPolyline';
-  return {
+  const normalizedLine = {
     id: nonEmptyString(rawLine.id) || `line_${index + 1}`,
     name: nonEmptyString(rawLine.name) || `Line ${index + 1}`,
     type,
     points,
-    yarnDiameter: clampNumber(rawLine.yarnDiameter, globalDefaults.yarnDiameter, 0.1, 50),
-    radialSegments: clampInteger(rawLine.radialSegments, globalDefaults.radialSegments, 12, 256),
-    pathSegments: clampInteger(rawLine.pathSegments, globalDefaults.pathSegments, 2, 512),
-    color: normalizeColor(rawLine.color, globalDefaults.color),
-    amplitude: clampNumber(rawLine.amplitude, 0, 0, 200),
-    period: clampNumber(rawLine.period, 8, 0.1, 1000),
-    cornerRadius: clampNumber(rawLine.cornerRadius, 4, 0, 200),
   };
+
+  setLineNumber(normalizedLine, 'yarnDiameter', rawLine.yarnDiameter, globalDefaults.yarnDiameter, 0.1, 50, false);
+  setLineNumber(normalizedLine, 'radialSegments', rawLine.radialSegments, globalDefaults.radialSegments, 12, 256, true);
+  setLineNumber(normalizedLine, 'pathSegments', rawLine.pathSegments, globalDefaults.pathSegments, 2, 512, true);
+  setLineNumber(normalizedLine, 'amplitude', rawLine.amplitude, globalDefaults.amplitude, 0, 200, false);
+  setLineNumber(normalizedLine, 'period', rawLine.period, globalDefaults.period, 0.1, 1000, false);
+  setLineNumber(normalizedLine, 'cornerRadius', rawLine.cornerRadius, globalDefaults.cornerRadius, 0, 200, false);
+
+  const color = pickString(rawLine.color) || pickString(globalDefaults.color);
+  if (color) {
+    normalizedLine.color = color;
+  }
+
+  return normalizedLine;
 }
 
 function normalizeLinePoints(rawPoints) {
@@ -646,11 +622,29 @@ function clampInteger(value, fallback, min, max) {
   return Math.round(clampNumber(value, fallback, min, max));
 }
 
-function normalizeColor(value, fallback) {
-  if (typeof value === 'string' && value.trim()) {
-    return value.trim();
+function setIfNumber(target, key, value, min, max, integer) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) {
+    return;
   }
-  return fallback;
+  const normalized = Math.min(max, Math.max(min, next));
+  target[key] = integer ? Math.round(normalized) : roundNumber(normalized);
+}
+
+function setLineNumber(target, key, lineValue, defaultValue, min, max, integer) {
+  const next = Number.isFinite(Number(lineValue)) ? Number(lineValue) : Number(defaultValue);
+  if (!Number.isFinite(next)) {
+    return;
+  }
+  const normalized = Math.min(max, Math.max(min, next));
+  target[key] = integer ? Math.round(normalized) : roundNumber(normalized);
+}
+
+function pickString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
 }
 
 function nonEmptyString(value) {

@@ -25,6 +25,16 @@
     <div v-if="hasRenderableModel" class="viewer-metrics">
       <span>{{ metricText.native }}</span>
     </div>
+    <div v-if="isYarnPathCollection" class="viewer-selection-panel">
+      <template v-if="selectedLineSpec">
+        <div>Selected: {{ selectedLineSpec.id }}</div>
+        <div>{{ selectedLineSpec.name || '-' }}</div>
+        <div>type: {{ selectedLineSpec.type || '-' }}</div>
+      </template>
+      <template v-else>
+        <div>未选中线条</div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -41,13 +51,10 @@ const props = defineProps<{
   code: string;
   parameters: Parameter[];
   modelSpec?: any | null;
+  selectedLineId?: string | null;
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
-}>();
-
-defineEmits<{
-  recreate: [];
 }>();
 
 const canvasHost = ref<HTMLDivElement | null>(null);
@@ -60,6 +67,13 @@ let modelMesh: Mesh | null = null;
 let modelGroup: THREE.Group | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
+const emit = defineEmits<{
+  recreate: [];
+  'update:selectedLineId': [value: string | null];
+}>();
+const selectedLineId = ref<string | null>(null);
+const pointerDownPos = ref<{ x: number; y: number } | null>(null);
+const raycaster = new (THREE as any).Raycaster();
 const metricText = ref({
   native: 'Native: -',
 });
@@ -68,6 +82,12 @@ const isYarnPathCollection = computed(() => props.modelSpec?.modelType === 'yarn
 const hasRenderableModel = computed(
   () => isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
 );
+const selectedLineSpec = computed(() => {
+  if (!isYarnPathCollection.value || !Array.isArray(props.modelSpec?.lines)) {
+    return null;
+  }
+  return props.modelSpec.lines.find((line: any) => line?.id === selectedLineId.value) ?? null;
+});
 
 function initScene() {
   if (!canvasHost.value) {
@@ -119,6 +139,8 @@ function initScene() {
 
   resizeObserver = new ResizeObserver(() => resizeRenderer());
   resizeObserver.observe(canvasHost.value);
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  renderer.domElement.addEventListener('pointerup', onPointerUp);
   resizeRenderer();
   animate();
 }
@@ -197,6 +219,8 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     metricText.value = {
       native: buildStatsLabel('Native', modelGroup, 'tube'),
     };
+    syncSelectedLineAfterRender();
+    updateLineHighlight();
     fitCameraToMesh();
     return;
   }
@@ -239,6 +263,92 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   };
 
   fitCameraToMesh();
+}
+
+function onPointerDown(event: PointerEvent) {
+  pointerDownPos.value = { x: event.clientX, y: event.clientY };
+}
+
+function onPointerUp(event: PointerEvent) {
+  if (!isYarnPathCollection.value || !renderer || !camera || !modelGroup || !pointerDownPos.value) {
+    return;
+  }
+
+  const dx = event.clientX - pointerDownPos.value.x;
+  const dy = event.clientY - pointerDownPos.value.y;
+  pointerDownPos.value = null;
+  if (Math.sqrt(dx * dx + dy * dy) > 4) {
+    return;
+  }
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  const pointer = {
+    x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  };
+  raycaster.setFromCamera(pointer, camera);
+  const intersects = raycaster.intersectObjects((modelGroup as any).children || [], true);
+  const hit = intersects.find((item: any) => item.object?.userData?.lineId);
+  setSelectedLineId(hit?.object?.userData?.lineId ?? null);
+}
+
+function setSelectedLineId(nextId: string | null) {
+  selectedLineId.value = nextId;
+  emit('update:selectedLineId', nextId);
+  updateLineHighlight();
+}
+
+function syncSelectedLineAfterRender() {
+  if (!modelGroup) {
+    setSelectedLineId(null);
+    return;
+  }
+
+  if (!selectedLineId.value) {
+    return;
+  }
+
+  let exists = false;
+  modelGroup.traverse((child) => {
+    const mesh = child as any;
+    if (mesh?.isMesh && mesh.userData?.lineId === selectedLineId.value) {
+      exists = true;
+    }
+  });
+  if (!exists) {
+    setSelectedLineId(null);
+  }
+}
+
+function updateLineHighlight() {
+  if (!modelGroup) {
+    return;
+  }
+
+  modelGroup.traverse((child) => {
+    const mesh = child as any;
+    if (!mesh?.isMesh || !mesh.material) {
+      return;
+    }
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const isSelected = mesh.userData?.lineId && mesh.userData.lineId === selectedLineId.value;
+    materials.forEach((material: any) => {
+      if (material?.color?.set && mesh.userData?.baseColor) {
+        material.color.set(mesh.userData.baseColor);
+      }
+      if (material?.emissive?.set) {
+        if (isSelected) {
+          material.emissive.set('#88f0c2');
+          material.emissiveIntensity = 0.35;
+        } else {
+          material.emissive.set('#000000');
+          material.emissiveIntensity = 0;
+        }
+      } else if (isSelected && material?.color?.set) {
+        material.color.set('#88f0c2');
+      }
+    });
+  });
 }
 
 function normalizeLinePoint(point: unknown): THREE.Vector3 | null {
@@ -374,6 +484,7 @@ function createTubeMeshFromLine(
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  (mesh as any).userData.baseColor = color;
   return mesh;
 }
 
@@ -470,9 +581,24 @@ watch(
   },
 );
 
+watch(
+  () => props.selectedLineId ?? null,
+  (nextId) => {
+    selectedLineId.value = nextId;
+    updateLineHighlight();
+  },
+  { immediate: true },
+);
+
+defineExpose({
+  getRenderObject: () => modelGroup || modelMesh,
+});
+
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
+  renderer?.domElement.removeEventListener('pointerdown', onPointerDown);
+  renderer?.domElement.removeEventListener('pointerup', onPointerUp);
   controls?.dispose();
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
@@ -499,6 +625,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #d9e6a8;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.viewer-selection-panel {
+  position: absolute;
+  left: 12px;
+  top: 12px;
   padding: 8px 10px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.45);

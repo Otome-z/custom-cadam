@@ -5,11 +5,7 @@
 
     <main class="layout">
       <section class="panel panel-form">
-        <div class="eyebrow">sub-cadam</div>
-        <h1>参数化文生模型最小闭环</h1>
-        <p class="intro">
-          支持三种链路：纯文本生成、图片+文本生成、以及直接输入 OpenSCAD。
-        </p>
+        <div class="eyebrow">配置</div>
 
         <div class="mode-row">
           <button
@@ -132,8 +128,7 @@
       <section class="panel panel-preview">
         <div class="preview-header">
           <div>
-            <div class="eyebrow">Preview</div>
-            <h2>Native three.js preview</h2>
+            <div class="eyebrow">预览</div>
           </div>
           <div class="preview-state">
             <span :class="['state-pill', isCompiling ? 'state-busy' : 'state-idle']">
@@ -171,7 +166,7 @@ type StreamDonePayload = {
 };
 
 const activeMode = ref<'llm' | 'direct'>('llm');
-const prompt = ref('生成一个参数化纱线面，由 1 根圆柱形纱线并排组成，单根直径 40mm，长度 120mm。');
+const prompt = ref('根据图片生成模型');
 const directScad = ref('');
 const code = ref('');
 const parameters = ref<Parameter[]>([]);

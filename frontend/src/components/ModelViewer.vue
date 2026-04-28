@@ -3,7 +3,7 @@
     <div ref="canvasHost" class="viewer-canvas"></div>
 
     <div v-if="loading" class="viewer-overlay">
-      <span>Building native three.js preview...</span>
+      <span>创建模型中...</span>
     </div>
     <div v-else-if="error" class="viewer-overlay viewer-overlay-error">
       <div class="viewer-error-card">
@@ -19,7 +19,7 @@
       </div>
     </div>
     <div v-else-if="!geometry && !hasWovenCatalogTag" class="viewer-overlay viewer-overlay-idle">
-      <span>Generate a model to preview it here.</span>
+      <span>待生成模型</span>
     </div>
 
     <div v-if="geometry || hasWovenCatalogTag" class="viewer-metrics">

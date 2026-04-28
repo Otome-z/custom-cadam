@@ -171,7 +171,7 @@ async function requestModel (
   {
     provider,
     messages,
-    maxTokens = 4000,
+    maxTokens = 8000,
     temperature = 0.2,
   },
 ) {
@@ -212,7 +212,7 @@ async function requestModelStream (
   {
     provider,
     messages,
-    maxTokens = 4000,
+    maxTokens = 8000,
     temperature = 0.2,
     onDelta,
   },
@@ -360,7 +360,7 @@ async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
 
     const data = await requestModel({
       provider,
-      maxTokens: 2200,
+      maxTokens: 4400,
       temperature: 0.1,
       messages: [
         {
@@ -414,7 +414,7 @@ async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta)
 
   await requestModelStream({
     provider,
-    maxTokens: 2200,
+    maxTokens: 4400,
     temperature: 0.1,
     messages: [
       {
@@ -541,7 +541,7 @@ Return repaired JSON only.`;
 
     const data = await requestModel({
       provider,
-      maxTokens: 2200,
+      maxTokens: 4400,
       temperature: 0,
       messages: [
         {

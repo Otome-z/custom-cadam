@@ -65,6 +65,21 @@
               {{ copied ? '已复制代码' : '复制 OpenSCAD' }}
             </button>
           </div>
+
+          <label class="field-label" for="done-payload-json">直接粘贴 donePayload JSON</label>
+          <textarea
+            id="done-payload-json"
+            v-model="donePayloadJsonInput"
+            class="prompt-input"
+            rows="6"
+            placeholder='粘贴 JSON.stringify(donePayload) 的结果'
+          />
+          <div class="actions">
+            <button class="primary-button" type="button" @click="generateFromDonePayloadString">
+              通过 donePayload 生成
+            </button>
+          </div>
+          <p v-if="donePayloadError" class="status status-error">{{ donePayloadError }}</p>
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
@@ -285,6 +300,8 @@ const thinkingText = ref('');
 const showThinking = ref(false);
 const imageDataUrl = ref('');
 const uploadedImageName = ref('');
+const donePayloadJsonInput = ref('');
+const donePayloadError = ref('');
 const exportError = ref('');
 const isExporting = ref(false);
 const selectedExportFormat = ref<ExportFormat>('obj');
@@ -347,6 +364,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
 
   isGenerating.value = true;
   requestError.value = '';
+  donePayloadError.value = '';
   copied.value = false;
   thinkingText.value = '';
   showThinking.value = false;
@@ -418,6 +436,101 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
     }
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : '生成请求失败。';
+  } finally {
+    isGenerating.value = false;
+  }
+}
+
+async function generateFromDonePayloadString() {
+  if (activeMode.value !== 'direct') {
+    return;
+  }
+
+  donePayloadError.value = '';
+  requestError.value = '';
+  const raw = donePayloadJsonInput.value.trim();
+  if (!raw) {
+    donePayloadError.value = '请先粘贴 donePayload 的 JSON 字符串。';
+    return;
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    donePayloadError.value = 'JSON 解析失败，请检查 donePayload 格式。';
+    return;
+  }
+
+  const providedModelSpec = parsed?.modelSpec && typeof parsed.modelSpec === 'object'
+    ? parsed.modelSpec
+    : (parsed?.modelType ? parsed : null);
+  if (!providedModelSpec) {
+    donePayloadError.value = '找不到 modelSpec。请粘贴完整 donePayload JSON。';
+    return;
+  }
+
+  isGenerating.value = true;
+  try {
+    const response = await fetch('/api/generate-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: typeof parsed?.prompt === 'string' && parsed.prompt.trim() ? parsed.prompt : 'from donePayload',
+        provider: 'qianwen',
+        modelSpec: providedModelSpec,
+        skipModelInference: true,
+      }),
+    });
+
+    if (!response.ok || !response.body) {
+      const payload = await response.json().catch(() => ({ error: '生成请求失败。' }));
+      throw new Error(payload.error || '生成请求失败。');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+
+      for (const chunk of chunks) {
+        const eventMatch = chunk.match(/event:\s*(.+)/);
+        const dataMatch = chunk.match(/data:\s*([\s\S]+)/);
+        if (!eventMatch || !dataMatch) {
+          continue;
+        }
+
+        const eventName = eventMatch[1].trim();
+        const payload = JSON.parse(dataMatch[1]);
+
+        if (eventName === 'done') {
+          const donePayload = payload as StreamDonePayload;
+          console.log('[generate-stream done]', JSON.stringify(donePayload));
+          code.value = donePayload.code;
+          modelSpec.value = donePayload.modelSpec ?? null;
+          if (!Array.isArray(donePayload.modelSpec?.lines)) {
+            selectedLineId.value = null;
+          }
+          lastPrompt.value = donePayload.prompt;
+          directScad.value = donePayload.code;
+        }
+
+        if (eventName === 'error') {
+          throw new Error(payload.error || '流式生成失败。');
+        }
+      }
+    }
+  } catch (error) {
+    donePayloadError.value = error instanceof Error ? error.message : '通过 donePayload 生成失败。';
   } finally {
     isGenerating.value = false;
   }

@@ -392,14 +392,13 @@ async function generateModelStream() {
         const payload = JSON.parse(dataMatch[1]);
 
         if (eventName === 'delta') {
-          if (payload.type === 'thinking' && payload.text) {
-            thinkingText.value += payload.text;
-          }
+          // ignore thinking deltas; only keep final result
           continue;
         }
 
         if (eventName === 'done') {
           const donePayload = payload as StreamDonePayload;
+          console.log('[LLM result]', donePayload);
           code.value = donePayload.code;
           modelSpec.value = donePayload.modelSpec ?? null;
           if (!Array.isArray(donePayload.modelSpec?.lines)) {

@@ -204,6 +204,18 @@ h2 {
   flex-wrap: wrap;
 }
 
+.export-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.export-select {
+  min-width: 220px;
+  flex: 1;
+}
+
 .primary-button,
 .ghost-button {
   display: inline-flex;

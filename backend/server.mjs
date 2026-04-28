@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadLocalEnv } from './loadEnv.mjs';
-import { SYSTEM_PROMPT } from './prompt.mjs';
 import {
   MODEL_SPEC_SYSTEM_PROMPT,
   normalizeCatalogModel,
+  fallbackCatalogModel,
   buildOpenScadFromModelSpec,
 } from './modelCatalog.mjs';
 
@@ -19,12 +19,24 @@ loadLocalEnv(projectRoot);
 
 const PORT = Number(process.env.PORT || 3001);
 
-const OPENROUTER_SITE_URL =
-  process.env.OPENROUTER_SITE_URL || 'http://localhost:5174';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '';
-const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'sub-cadam';
-const OPENROUTER_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const QIANWEN_SITE_URL =
+  process.env.QIANWEN_SITE_URL
+  || process.env.OPENROUTER_SITE_URL
+  || 'http://localhost:5174';
+const QIANWEN_APP_NAME =
+  process.env.QIANWEN_APP_NAME
+  || process.env.OPENROUTER_APP_NAME
+  || 'sub-cadam';
+const QIANWEN_API_KEY =
+  process.env.QIANWEN_API_KEY
+  || process.env.OPENROUTER_API_KEY
+  || '';
+const QIANWEN_MODEL =
+  process.env.QIANWEN_MODEL
+  || process.env.OPENROUTER_MODEL
+  || 'qwen-plus';
+const QIANWEN_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -53,64 +65,6 @@ function sendText (res, statusCode, message) {
     'Cache-Control': 'no-store',
   });
   res.end(message);
-}
-
-function normalizeGeneratedCode (rawText) {
-  const trimmed = rawText.trim();
-  const exactBlock = trimmed.match(/^```(?:openscad)?\s*\n?([\s\S]*?)\n?```$/i);
-  if (exactBlock) {
-    return exactBlock[1].trim();
-  }
-
-  const codeBlock = trimmed.match(/```(?:openscad)?\s*\n?([\s\S]*?)\n?```/i);
-  if (codeBlock) {
-    return codeBlock[1].trim();
-  }
-
-  return trimmed;
-}
-
-function ensureCurveResolutionDefaults (code) {
-  if (!code.trim()) {
-    return code;
-  }
-
-  let nextCode = code
-    .replace(
-      /(^|\n)([ \t]*)\$fn\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
-      (_match, prefix, indent, rawValue) =>
-        `${prefix}${indent}$fn = ${Math.max(Number(rawValue), 96)};`,
-    )
-    .replace(
-      /(^|\n)([ \t]*)\$fa\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
-      (_match, prefix, indent, rawValue) =>
-        `${prefix}${indent}$fa = ${Math.min(Number(rawValue), 3)};`,
-    )
-    .replace(
-      /(^|\n)([ \t]*)\$fs\s*=\s*(\d+(?:\.\d+)?)\s*;[^\n]*/g,
-      (_match, prefix, indent, rawValue) =>
-        `${prefix}${indent}$fs = ${Math.min(Number(rawValue), 0.4)};`,
-    );
-
-  const preamble = [];
-
-  if (!/(^|\n)\s*\$fn\s*=/.test(nextCode)) {
-    preamble.push('$fn = 96;');
-  }
-
-  if (!/(^|\n)\s*\$fa\s*=/.test(nextCode)) {
-    preamble.push('$fa = 3;');
-  }
-
-  if (!/(^|\n)\s*\$fs\s*=/.test(nextCode)) {
-    preamble.push('$fs = 0.4;');
-  }
-
-  if (!preamble.length) {
-    return nextCode;
-  }
-
-  return `${preamble.join('\n')}\n\n${nextCode}`;
 }
 
 function extractMessageText (content) {
@@ -196,25 +150,50 @@ function readRequestBody (req) {
   });
 }
 
-async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.2 }) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
+function normalizeProvider(provider) {
+  return 'qianwen';
+}
+
+function resolveProviderConfig(provider) {
+  return {
+    name: 'Qianwen',
+    url: QIANWEN_URL,
+    apiKey: QIANWEN_API_KEY,
+    model: QIANWEN_MODEL,
+    headers: {
+      'HTTP-Referer': QIANWEN_SITE_URL,
+      'X-Title': QIANWEN_APP_NAME,
+    },
+  };
+}
+
+async function requestModel (
+  {
+    provider,
+    messages,
+    maxTokens = 4000,
+    temperature = 0.2,
+  },
+) {
+  const config = resolveProviderConfig(provider);
+
+  if (!config.apiKey) {
+    throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
-  if (!OPENROUTER_MODEL) {
-    throw new Error('Missing OPENROUTER_MODEL in sub-cadam/.env');
+  if (!config.model) {
+    throw new Error('Missing QIANWEN_MODEL in sub-cadam/.env');
   }
 
-  const response = await fetch(OPENROUTER_URL, {
+  const response = await fetch(config.url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': OPENROUTER_SITE_URL,
-      'X-Title': OPENROUTER_APP_NAME,
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers,
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model: config.model,
       max_tokens: maxTokens,
       temperature,
       messages,
@@ -223,15 +202,121 @@ async function requestOpenRouter ({ messages, maxTokens = 4000, temperature = 0.
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`DashScope request failed: ${response.status} ${errText}`);
+    throw new Error(`${config.name} request failed: ${response.status} ${errText}`);
   }
 
   return response.json();
 }
 
-async function inferCatalogModel (prompt) {
+async function requestModelStream (
+  {
+    provider,
+    messages,
+    maxTokens = 4000,
+    temperature = 0.2,
+    onDelta,
+  },
+) {
+  const config = resolveProviderConfig(provider);
+
+  if (!config.apiKey) {
+    throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
+  }
+
+  const response = await fetch(config.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: maxTokens,
+      temperature,
+      stream: true,
+      messages,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const errText = await response.text();
+    throw new Error(`${config.name} stream request failed: ${response.status} ${errText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data:')) {
+        continue;
+      }
+
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') {
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        continue;
+      }
+
+      const delta = parsed?.choices?.[0]?.delta;
+      if (!delta || typeof onDelta !== 'function') {
+        continue;
+      }
+
+      const reasoningChunk = extractMessageText(delta.reasoning_content);
+      if (reasoningChunk) {
+        onDelta({ type: 'thinking', text: reasoningChunk });
+      }
+
+      const contentChunk = extractMessageText(delta.content);
+      if (contentChunk) {
+        onDelta({ type: 'result', text: contentChunk });
+      }
+    }
+  }
+}
+
+function buildUserContent(prompt, imageDataUrl) {
+  if (!imageDataUrl) {
+    return prompt;
+  }
+
+  return [
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageDataUrl,
+      },
+    },
+  ];
+}
+
+async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
   try {
-    const data = await requestOpenRouter({
+    const data = await requestModel({
+      provider,
       maxTokens: 1200,
       temperature: 0.1,
       messages: [
@@ -241,7 +326,7 @@ async function inferCatalogModel (prompt) {
         },
         {
           role: 'user',
-          content: prompt,
+          content: buildUserContent(prompt, imageDataUrl),
         },
       ],
     });
@@ -255,44 +340,73 @@ async function inferCatalogModel (prompt) {
   }
 }
 
-async function generateOpenScad (prompt) {
-  const catalogModelSpec = await inferCatalogModel(prompt);
-  if (catalogModelSpec) {
-    const code = buildOpenScadFromModelSpec(catalogModelSpec);
-    if (code) {
-      return {
-        code,
-        modelSpec: catalogModelSpec,
-      };
-    }
-  }
+async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta) {
+  let resultText = '';
 
-  const data = await requestOpenRouter({
-    maxTokens: 4000,
-    temperature: 0.2,
+  await requestModelStream({
+    provider,
+    maxTokens: 1200,
+    temperature: 0.1,
     messages: [
       {
         role: 'system',
-        content: SYSTEM_PROMPT,
+        content: MODEL_SPEC_SYSTEM_PROMPT,
       },
       {
         role: 'user',
-        content: prompt,
+        content: buildUserContent(prompt, imageDataUrl),
       },
     ],
+    onDelta: (delta) => {
+      if (delta.type === 'result') {
+        resultText += delta.text;
+      }
+      onDelta?.(delta);
+    },
   });
 
-  const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
-  const code = ensureCurveResolutionDefaults(normalizeGeneratedCode(rawText));
+  const payload = extractJsonPayload(resultText);
+  return normalizeCatalogModel(payload);
+}
+
+async function generateOpenScad (prompt, provider) {
+  const catalogModelSpec = await inferCatalogModel(prompt, provider);
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
+  const code = buildOpenScadFromModelSpec(modelSpec);
 
   if (!code) {
-    throw new Error('OpenRouter returned an empty response.');
+    throw new Error('Failed to build OpenSCAD from catalog model spec.');
   }
 
   return {
     code,
-    modelSpec: null,
+    modelSpec,
   };
+}
+
+async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) {
+  const catalogModelSpec = await inferCatalogModelStream(
+    prompt,
+    provider,
+    imageDataUrl,
+    onDelta,
+  );
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt);
+  const code = buildOpenScadFromModelSpec(modelSpec);
+
+  if (!code) {
+    throw new Error('Failed to build OpenSCAD from catalog model spec.');
+  }
+
+  return {
+    code,
+    modelSpec,
+  };
+}
+
+function sendSseEvent(res, event, payload) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function safeResolvePublicPath (urlPath) {
@@ -363,15 +477,17 @@ const server = http.createServer(async (req, res) => {
         const body = await readRequestBody(req);
         const prompt =
           typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const provider = normalizeProvider(body.provider);
 
         if (!prompt) {
           sendJson(res, 400, { error: 'Prompt is required.' });
           return;
         }
 
-        const result = await generateOpenScad(prompt);
+        const result = await generateOpenScad(prompt, provider);
         sendJson(res, 200, {
           prompt,
+          provider,
           code: result.code,
           modelSpec: result.modelSpec,
         });
@@ -380,6 +496,62 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 500, {
           error: error instanceof Error ? error.message : 'Unknown server error',
         });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/generate-stream' && method === 'POST') {
+      try {
+        const body = await readRequestBody(req);
+        const prompt =
+          typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const provider = normalizeProvider(body.provider);
+        const imageDataUrl =
+          typeof body.imageDataUrl === 'string' ? body.imageDataUrl : '';
+
+        if (!prompt) {
+          sendJson(res, 400, { error: 'Prompt is required.' });
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-store',
+          Connection: 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        });
+
+        const result = await generateOpenScadStream(
+          prompt,
+          provider,
+          imageDataUrl,
+          (delta) => {
+            sendSseEvent(res, 'delta', delta);
+          },
+        );
+
+        sendSseEvent(res, 'done', {
+          prompt,
+          provider,
+          code: result.code,
+          modelSpec: result.modelSpec,
+        });
+        res.end();
+      } catch (error) {
+        console.error('Generate stream API failed:', error);
+        if (!res.headersSent) {
+          sendJson(res, 500, {
+            error: error instanceof Error ? error.message : 'Unknown server error',
+          });
+          return;
+        }
+
+        sendSseEvent(res, 'error', {
+          error: error instanceof Error ? error.message : 'Unknown server error',
+        });
+        res.end();
       }
       return;
     }

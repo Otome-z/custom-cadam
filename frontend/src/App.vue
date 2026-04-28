@@ -26,7 +26,7 @@
           </button>
         </div>
 
-        <form v-if="activeMode === 'llm'" class="prompt-form" @submit.prevent="generateModelStream">
+        <form v-if="activeMode === 'llm'" class="prompt-form" @submit.prevent="generateModelStreamFromPrompt">
           <label class="field-label" for="prompt">描述你的模型</label>
           <textarea
             id="prompt"
@@ -243,7 +243,7 @@
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
-          @recreate="generateModelStream"
+          @recreate="generateModelStreamFromLastResult"
         />
       </section>
     </main>
@@ -334,7 +334,7 @@ watch(yarnLines, (lines) => {
   }
 });
 
-async function generateModelStream() {
+async function generateModelStream(options: { reuseLastResult?: boolean } = {}) {
   if (activeMode.value !== 'llm') {
     return;
   }
@@ -352,6 +352,7 @@ async function generateModelStream() {
   showThinking.value = false;
 
   try {
+    const shouldReuseLastResult = Boolean(options.reuseLastResult && modelSpec.value);
     const response = await fetch('/api/generate-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -359,6 +360,8 @@ async function generateModelStream() {
         prompt: trimmedPrompt,
         provider: 'qianwen',
         imageDataUrl: imageDataUrl.value || undefined,
+        modelSpec: shouldReuseLastResult ? modelSpec.value : undefined,
+        skipModelInference: shouldReuseLastResult,
       }),
     });
 
@@ -398,7 +401,7 @@ async function generateModelStream() {
 
         if (eventName === 'done') {
           const donePayload = payload as StreamDonePayload;
-          console.log('[LLM result]', donePayload);
+          console.log('[generate-stream done]', JSON.stringify(donePayload));
           code.value = donePayload.code;
           modelSpec.value = donePayload.modelSpec ?? null;
           if (!Array.isArray(donePayload.modelSpec?.lines)) {
@@ -418,6 +421,14 @@ async function generateModelStream() {
   } finally {
     isGenerating.value = false;
   }
+}
+
+function generateModelStreamFromPrompt() {
+  return generateModelStream({ reuseLastResult: false });
+}
+
+function generateModelStreamFromLastResult() {
+  return generateModelStream({ reuseLastResult: true });
 }
 
 function applyDirectScad() {

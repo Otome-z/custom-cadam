@@ -679,6 +679,8 @@ const server = http.createServer(async (req, res) => {
         const imageDataUrl = normalizeImageDataUrl(
           typeof body.imageDataUrl === 'string' ? body.imageDataUrl : '',
         );
+        const skipModelInference = Boolean(body.skipModelInference);
+        const providedModelSpec = body.modelSpec && typeof body.modelSpec === 'object' ? body.modelSpec : null;
 
         if (!prompt) {
           sendJson(res, 400, { error: 'Prompt is required.' });
@@ -693,6 +695,30 @@ const server = http.createServer(async (req, res) => {
           'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
         });
+
+        if (skipModelInference && providedModelSpec) {
+          const normalizedProvidedModel = normalizeCatalogModel(providedModelSpec);
+          console.log('[catalog] using frontend provided modelSpec:', {
+            skipModelInference,
+            hasImage: Boolean(imageDataUrl),
+            normalized: Boolean(normalizedProvidedModel),
+            modelType: normalizedProvidedModel?.modelType,
+          });
+          if (normalizedProvidedModel) {
+            const directCode = buildOpenScadFromModelSpec(normalizedProvidedModel);
+            if (directCode) {
+              sendSseEvent(res, 'done', {
+                prompt,
+                provider,
+                code: directCode,
+                modelSpec: normalizedProvidedModel,
+              });
+              res.end();
+              return;
+            }
+          }
+          console.warn('[catalog] provided modelSpec invalid or failed to build, fallback to model inference');
+        }
 
         const result = await generateOpenScadStream(
           prompt,

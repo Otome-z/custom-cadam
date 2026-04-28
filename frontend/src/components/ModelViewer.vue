@@ -78,9 +78,10 @@ const metricText = ref({
   native: 'Native: -',
 });
 const hasWovenCatalogTag = computed(() => props.code.includes('catalog_model: woven_yarn_sheet'));
+const isWovenPathPattern = computed(() => props.modelSpec?.modelType === 'woven_path_pattern');
 const isYarnPathCollection = computed(() => props.modelSpec?.modelType === 'yarn_path_collection');
 const hasRenderableModel = computed(
-  () => isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
+  () => isWovenPathPattern.value || isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
 );
 const selectedLineSpec = computed(() => {
   if (!isYarnPathCollection.value || !Array.isArray(props.modelSpec?.lines)) {
@@ -210,6 +211,17 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     scene.remove(modelGroup);
     disposeObject3D(modelGroup);
     modelGroup = null;
+  }
+
+  if (isWovenPathPattern.value && props.modelSpec) {
+    modelGroup = createWovenPathPatternGroup(props.modelSpec);
+    modelGroup.position.x = -36;
+    scene.add(modelGroup);
+    metricText.value = {
+      native: buildStatsLabel('Native', modelGroup, 'woven_path_pattern'),
+    };
+    fitCameraToMesh();
+    return;
   }
 
   if (isYarnPathCollection.value && props.modelSpec) {
@@ -515,6 +527,145 @@ function createYarnPathCollectionGroup(modelSpec: any): THREE.Group {
   });
 
   return group;
+}
+
+function createWovenPathPatternGroup(modelSpec: any): THREE.Group {
+  const group = new THREE.Group();
+  const defaults = modelSpec?.globalDefaults ?? {};
+  const warp = modelSpec?.warp ?? {};
+  const weftPairs = modelSpec?.weftPairs ?? {};
+  const crossing = modelSpec?.crossing ?? {};
+  const highlight = modelSpec?.highlight ?? {};
+  const transform = modelSpec?.transform ?? {};
+
+  const yarnDiameter = Math.max(0.1, Number(defaults.yarnDiameter) || 1);
+  const radialSegments = Math.max(12, Math.round(Number(defaults.radialSegments) || 64));
+  const pathSegments = Math.max(2, Math.round(Number(defaults.pathSegments) || 120));
+
+  const warpCount = Math.max(1, Math.round(Number(warp.count) || 10));
+  const warpSpacing = Number(warp.spacing) || 8;
+  const warpLength = Number(warp.length) || 130;
+  const warpColor = typeof defaults.warpColor === 'string' ? defaults.warpColor : '#d9ddd0';
+
+  for (let index = 0; index < warpCount; index += 1) {
+    const x = index * warpSpacing;
+    const p1 = new THREE.Vector3(x, 0, 0);
+    const p2 = new THREE.Vector3(x, warpLength, 0);
+    const curve = new THREE.LineCurve3(p1, p2);
+    const geometry = new THREE.TubeGeometry(curve, pathSegments, yarnDiameter / 2, radialSegments, false);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: warpColor, roughness: 0.6, metalness: 0.08 }));
+    (mesh as any).userData = { kind: 'warp', groupId: 'warp_group', lineId: `warp_${index}` };
+    group.add(mesh);
+  }
+
+  const pairCount = Math.max(1, Math.round(Number(weftPairs.count) || 8));
+  const pairSpacing = Number(weftPairs.spacing) || 10;
+  const pairOffset = Number(weftPairs.pairOffset) || 3;
+  const length = Number(weftPairs.length) || 150;
+  const stepLength = Number(weftPairs.stepLength) || 28;
+  const stepDrop = Number(weftPairs.stepDrop) || 8;
+  const cornerRadius = Number(weftPairs.cornerRadius) || 4;
+  const crossingHeight = Math.max(0, Number(crossing.height) || 2);
+  const crossingStart = /under/i.test(String(crossing.start || 'over')) ? 'under' : 'over';
+  const weftColor = typeof defaults.weftColor === 'string' ? defaults.weftColor : '#ffffff';
+  const highlightColor = typeof highlight.color === 'string'
+    ? highlight.color
+    : (typeof defaults.highlightColor === 'string' ? defaults.highlightColor : '#f5e642');
+  const highlightIndex = Math.max(0, Math.round(Number(highlight.weftIndex) || 0));
+  const highlightRole = /lower/i.test(String(highlight.pairRole || 'upper')) ? 'lower' : 'upper';
+
+  for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+    const baseY = pairIndex * pairSpacing;
+    const roles: Array<'upper' | 'lower'> = ['upper', 'lower'];
+    roles.forEach((role) => {
+      const y = baseY + (role === 'upper' ? 0 : pairOffset);
+      const roleStart = role === 'upper' ? crossingStart : (crossingStart === 'over' ? 'under' : 'over');
+      const points = createRoundedZigzagPoints({
+        x0: 0,
+        y,
+        length,
+        stepLength,
+        stepDrop,
+        crossingHeight,
+        start: roleStart,
+      });
+      const curvePath = new (THREE as any).CurvePath();
+      for (let i = 0; i < points.length - 1; i += 1) {
+        curvePath.add(new THREE.LineCurve3(points[i], points[i + 1]));
+      }
+      const color = pairIndex === highlightIndex && role === highlightRole ? highlightColor : weftColor;
+      const geometry = new THREE.TubeGeometry(curvePath as any, Math.max(pathSegments, points.length * 4), yarnDiameter / 2, radialSegments, false);
+      const mesh = new THREE.Mesh(
+        geometry,
+        new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.08 }),
+      );
+      (mesh as any).userData = {
+        kind: 'weft',
+        groupId: `weft_group_${pairIndex}`,
+        pairId: `pair_${pairIndex}`,
+        lineId: `weft_${pairIndex}_${role}`,
+        cornerRadius,
+      };
+      group.add(mesh);
+    });
+  }
+
+  const rotationZ = Number(transform.rotationZ) || 0;
+  const scaleX = Number(transform.scaleX) || 1;
+  const scaleY = Number(transform.scaleY) || 1;
+  const scaleZ = Number(transform.scaleZ) || 1;
+  if ((group as any).rotation) {
+    (group as any).rotation.z = rotationZ * Math.PI / 180;
+  }
+  if ((group as any).scale?.set) {
+    (group as any).scale.set(scaleX, scaleY, scaleZ);
+  }
+  return group;
+}
+
+function createRoundedZigzagPoints({
+  x0,
+  y,
+  length,
+  stepLength,
+  stepDrop,
+  crossingHeight,
+  start,
+}: {
+  x0: number;
+  y: number;
+  length: number;
+  stepLength: number;
+  stepDrop: number;
+  crossingHeight: number;
+  start: 'over' | 'under';
+}): THREE.Vector3[] {
+  const points: THREE.Vector3[] = [];
+  let x = x0;
+  let currentY = y;
+  let crossingIndex = 0;
+  let direction = 1;
+  points.push(new THREE.Vector3(x, currentY, zByCrossing(crossingIndex, start, crossingHeight)));
+  while (x < x0 + length) {
+    x += stepLength;
+    crossingIndex += 1;
+    points.push(new THREE.Vector3(Math.min(x, x0 + length), currentY, zByCrossing(crossingIndex, start, crossingHeight)));
+    if (x >= x0 + length) {
+      break;
+    }
+    x += stepDrop;
+    currentY += stepDrop * direction;
+    crossingIndex += 1;
+    points.push(new THREE.Vector3(Math.min(x, x0 + length), currentY, zByCrossing(crossingIndex, start, crossingHeight)));
+    direction *= -1;
+  }
+  return points;
+}
+
+function zByCrossing(index: number, start: 'over' | 'under', height: number): number {
+  const even = index % 2 === 0;
+  const over = start === 'over' ? even : !even;
+  return over ? height : -height;
 }
 
 function buildStatsLabel(label: string, object: THREE.Object3D | BufferGeometry, normalMode: string) {

@@ -8,6 +8,16 @@ const MODEL_CATALOG = {
 // line_count = ${Array.isArray(modelSpec?.lines) ? modelSpec.lines.length : 0};
 `,
   },
+  woven_path_pattern: {
+    displayName: 'Woven Path Pattern',
+    description: 'A structured woven yarn path pattern with straight warp strands, paired rounded-zigzag weft strands, and over-under crossing rules.',
+    parameters: {},
+    buildCode: (params, modelSpec) => `// catalog_model: woven_path_pattern
+// This model is rendered by native three.js from modelSpec.
+// warp_count = ${modelSpec?.warp?.count ?? 0};
+// weft_pair_count = ${modelSpec?.weftPairs?.count ?? 0};
+`,
+  },
   straight_yarn_bundle: {
     displayName: 'Straight Yarn Bundle',
     description: 'Parallel cylindrical yarn strands arranged side by side.',
@@ -310,6 +320,15 @@ Rules:
 - Always map the user request to one of the supported model types.
 - Do not output custom_scad.
 - If the input includes an image, first extract visible yarn centerlines / line paths.
+- If the image shows a structured woven yarn diagram with straight warp strands and paired horizontal folded weft strands, prefer modelType = "woven_path_pattern".
+- In this woven pattern, horizontal weft strands are NOT sine waves; they are rounded-zigzag / stepped polyline paths.
+- Their local shape is: P0 ---- P1, then diagonal transition, then P2 ---- P3.
+- Use weftPairs.shape = "rounded-zigzag".
+- Do not represent these weft strands as type="sine" unless user explicitly asks sinusoidal waves.
+- Do not flatten paired interlaced weft structure into independent smoothPolyline grid when image clearly shows interlacing.
+- Use crossing.mode = "alternate" and crossing.height > 0 for over-under weaving.
+- Use highlight.weftIndex and highlight.color for yellow strand.
+- Use yarn_path_collection for freeform unrelated line sketches; use woven_path_pattern for repeated regular woven path diagrams.
 - If an image contains multiple distinct yarn paths, output modelType = "yarn_path_collection".
 - If an image contains vertical straight strands and horizontal folded / wavy / interlaced strands, MUST output yarn_path_collection.
 - Do not choose yarn_sheet when image contains both straight vertical yarns and folded / wavy / interlaced horizontal yarns.
@@ -367,6 +386,52 @@ Line-based:
   ]
 }
 
+Structured woven path pattern:
+{
+  "modelType": "woven_path_pattern",
+  "summary": "short summary",
+  "globalDefaults": {
+    "yarnDiameter": 1,
+    "radialSegments": 64,
+    "pathSegments": 120,
+    "warpColor": "#d9ddd0",
+    "weftColor": "#ffffff",
+    "highlightColor": "#f5e642"
+  },
+  "warp": {
+    "count": 10,
+    "spacing": 8,
+    "length": 130,
+    "tilt": -12
+  },
+  "weftPairs": {
+    "count": 8,
+    "spacing": 10,
+    "pairOffset": 3,
+    "length": 150,
+    "shape": "rounded-zigzag",
+    "stepLength": 28,
+    "stepDrop": 8,
+    "cornerRadius": 4
+  },
+  "crossing": {
+    "mode": "alternate",
+    "height": 2,
+    "start": "over"
+  },
+  "highlight": {
+    "weftIndex": 4,
+    "pairRole": "upper",
+    "color": "#f5e642"
+  },
+  "transform": {
+    "rotationZ": -18,
+    "scaleX": 1,
+    "scaleY": 0.85,
+    "scaleZ": 1
+  }
+}
+
 Legacy catalog model:
 {
   "modelType": "straight_yarn_bundle | yarn_sheet | woven_yarn_sheet | twisted_yarn_bundle | curved_yarn_path | braided_yarn",
@@ -410,6 +475,76 @@ export function normalizeCatalogModel(payload) {
     };
   }
 
+  if (modelType === 'woven_path_pattern') {
+    const globalDefaultsRaw = payload.globalDefaults && typeof payload.globalDefaults === 'object' ? payload.globalDefaults : {};
+    const globalDefaults = {
+      yarnDiameter: clampNumber(globalDefaultsRaw.yarnDiameter, 1, 0.1, 50),
+      radialSegments: clampInteger(globalDefaultsRaw.radialSegments, 64, 12, 256),
+      pathSegments: clampInteger(globalDefaultsRaw.pathSegments, 120, 2, 512),
+      warpColor: normalizeHexColor(globalDefaultsRaw.warpColor) || '#d9ddd0',
+      weftColor: normalizeHexColor(globalDefaultsRaw.weftColor) || '#ffffff',
+      highlightColor: normalizeHexColor(globalDefaultsRaw.highlightColor) || '#f5e642',
+    };
+
+    const warpRaw = payload.warp && typeof payload.warp === 'object' ? payload.warp : {};
+    const warp = {
+      count: clampInteger(warpRaw.count, 10, 1, 128),
+      spacing: clampNumber(warpRaw.spacing, 8, 0.1, 100),
+      length: clampNumber(warpRaw.length, 130, 1, 1000),
+      tilt: clampNumber(warpRaw.tilt, 0, -180, 180),
+      start: normalizeVector3(warpRaw.start, [0, 0, 0]),
+      direction: normalizeVector3(warpRaw.direction, [0, 1, 0]),
+    };
+
+    const weftRaw = payload.weftPairs && typeof payload.weftPairs === 'object' ? payload.weftPairs : {};
+    const weftPairs = {
+      count: clampInteger(weftRaw.count, 8, 1, 128),
+      spacing: clampNumber(weftRaw.spacing, 10, 0.1, 100),
+      pairOffset: clampNumber(weftRaw.pairOffset, 3, 0, 100),
+      length: clampNumber(weftRaw.length, 150, 1, 1000),
+      shape: nonEmptyString(weftRaw.shape) || 'rounded-zigzag',
+      stepLength: clampNumber(weftRaw.stepLength, 28, 1, 300),
+      stepDrop: clampNumber(weftRaw.stepDrop, 8, 0.1, 200),
+      cornerRadius: clampNumber(weftRaw.cornerRadius, 4, 0, 200),
+    };
+
+    const crossingRaw = payload.crossing && typeof payload.crossing === 'object' ? payload.crossing : {};
+    const crossing = {
+      mode: nonEmptyString(crossingRaw.mode) || 'alternate',
+      height: clampNumber(crossingRaw.height, 2, 0, 100),
+      start: /under/i.test(nonEmptyString(crossingRaw.start)) ? 'under' : 'over',
+    };
+
+    const highlightRaw = payload.highlight && typeof payload.highlight === 'object' ? payload.highlight : {};
+    const highlight = {
+      weftIndex: clampInteger(highlightRaw.weftIndex, 0, 0, 1000),
+      pairRole: /lower/i.test(nonEmptyString(highlightRaw.pairRole)) ? 'lower' : 'upper',
+      color: normalizeHexColor(highlightRaw.color) || '#f5e642',
+    };
+
+    const transformRaw = payload.transform && typeof payload.transform === 'object' ? payload.transform : {};
+    const transform = {
+      rotationZ: clampNumber(transformRaw.rotationZ, 0, -360, 360),
+      scaleX: clampNumber(transformRaw.scaleX, 1, 0.01, 100),
+      scaleY: clampNumber(transformRaw.scaleY, 1, 0.01, 100),
+      scaleZ: clampNumber(transformRaw.scaleZ, 1, 0.01, 100),
+    };
+
+    return {
+      modelType,
+      displayName: entry.displayName,
+      description: entry.description,
+      source: 'catalog',
+      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined,
+      globalDefaults,
+      warp,
+      weftPairs,
+      crossing,
+      highlight,
+      transform,
+    };
+  }
+
   const rawParameters = payload.parameters && typeof payload.parameters === 'object' ? payload.parameters : {};
 
   const parameters = Object.entries(entry.parameters).map(([name, schema]) => ({
@@ -440,6 +575,10 @@ export function fallbackCatalogModel(promptText = '', options = {}) {
   const explicitGlobalSheet = /(整片织物|整体织物|规则编织面|经纬网格|统一间距|统一周期|uniform\s+warp|uniform\s+weft|regular\s+woven\s+sheet|global\s+sheet)/i.test(promptText);
   const lineHint = /(折线|波浪线|线条|路径|纹路|曲线|\bp0\b|\bp1\b|\bp2\b|\bp3\b|path|line|polyline|wave|route)/i.test(promptText);
   const genericImagePrompt = /(根据图片生成模型|按图片生成|参考图片生成模型|generate from image)/i.test(promptText);
+
+  if (hasImage && !lineHint && (!explicitGlobalSheet || genericImagePrompt)) {
+    return buildFallbackWovenPathPattern();
+  }
 
   if (hasImage && (!explicitGlobalSheet || lineHint || genericImagePrompt)) {
     return buildFallbackYarnPathCollection();
@@ -488,7 +627,7 @@ export function buildOpenScadFromModelSpec(modelSpec) {
     return null;
   }
 
-  if (modelSpec.modelType === 'yarn_path_collection') {
+  if (modelSpec.modelType === 'yarn_path_collection' || modelSpec.modelType === 'woven_path_pattern') {
     return entry.buildCode({}, modelSpec);
   }
 
@@ -578,6 +717,28 @@ function normalizeLineSpec(rawLine, index, globalDefaults) {
   setLineNumber(normalizedLine, 'cornerRadius', rawLine.cornerRadius, globalDefaults.cornerRadius, 0, 200, false);
 
   normalizedLine.color = normalizeHexColor(rawLine.color) || normalizeHexColor(globalDefaults.color) || DEFAULT_LINE_COLOR;
+  if (nonEmptyString(rawLine.groupId)) {
+    normalizedLine.groupId = nonEmptyString(rawLine.groupId);
+  }
+  if (nonEmptyString(rawLine.pairId)) {
+    normalizedLine.pairId = nonEmptyString(rawLine.pairId);
+  }
+  if (nonEmptyString(rawLine.pairRole)) {
+    normalizedLine.pairRole = nonEmptyString(rawLine.pairRole);
+  }
+  if (nonEmptyString(rawLine.layer)) {
+    normalizedLine.layer = nonEmptyString(rawLine.layer);
+  }
+  if (rawLine.crossingRule && typeof rawLine.crossingRule === 'object' && !Array.isArray(rawLine.crossingRule)) {
+    normalizedLine.crossingRule = {
+      mode: nonEmptyString(rawLine.crossingRule.mode) || 'alternate',
+      height: clampNumber(rawLine.crossingRule.height, 2, 0, 100),
+      start: /under/i.test(nonEmptyString(rawLine.crossingRule.start)) ? 'under' : 'over',
+    };
+  }
+  if (Number.isFinite(Number(rawLine.zOffset))) {
+    normalizedLine.zOffset = roundNumber(Number(rawLine.zOffset));
+  }
 
   return normalizedLine;
 }
@@ -752,4 +913,69 @@ function buildFallbackYarnPathCollection() {
       },
     ],
   };
+}
+
+function buildFallbackWovenPathPattern() {
+  return {
+    modelType: 'woven_path_pattern',
+    displayName: MODEL_CATALOG.woven_path_pattern.displayName,
+    description: MODEL_CATALOG.woven_path_pattern.description,
+    source: 'catalog_fallback',
+    summary: 'Fallback structured woven path pattern',
+    globalDefaults: {
+      yarnDiameter: 1,
+      radialSegments: 64,
+      pathSegments: 120,
+      warpColor: '#d9ddd0',
+      weftColor: '#ffffff',
+      highlightColor: '#f5e642',
+    },
+    warp: {
+      count: 10,
+      spacing: 8,
+      length: 130,
+      tilt: -12,
+      start: [0, 0, 0],
+      direction: [0, 1, 0],
+    },
+    weftPairs: {
+      count: 8,
+      spacing: 10,
+      pairOffset: 3,
+      length: 150,
+      shape: 'rounded-zigzag',
+      stepLength: 28,
+      stepDrop: 8,
+      cornerRadius: 4,
+    },
+    crossing: {
+      mode: 'alternate',
+      height: 2,
+      start: 'over',
+    },
+    highlight: {
+      weftIndex: 4,
+      pairRole: 'upper',
+      color: '#f5e642',
+    },
+    transform: {
+      rotationZ: -18,
+      scaleX: 1,
+      scaleY: 0.85,
+      scaleZ: 1,
+    },
+  };
+}
+
+function normalizeVector3(value, fallback) {
+  if (!Array.isArray(value) || value.length < 3) {
+    return [...fallback];
+  }
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  const z = Number(value[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return [...fallback];
+  }
+  return [roundNumber(x), roundNumber(y), roundNumber(z)];
 }

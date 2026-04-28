@@ -33,6 +33,7 @@ function normalizeWorkerError(response: WorkerResponseMessage): Error {
 const NATIVE_THREE_CATALOG_TAGS = [
   'catalog_model: woven_yarn_sheet',
   'catalog_model: yarn_path_collection',
+  'catalog_model: woven_path_pattern',
 ];
 
 function isNativeThreeCatalogCode(source: string): boolean {

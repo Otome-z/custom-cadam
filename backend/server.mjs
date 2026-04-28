@@ -295,7 +295,8 @@ async function requestModelStream (
 }
 
 function buildUserContent(prompt, imageDataUrl) {
-  if (!imageDataUrl) {
+  const normalizedImageDataUrl = normalizeImageDataUrl(imageDataUrl);
+  if (!normalizedImageDataUrl) {
     return prompt;
   }
 
@@ -307,17 +308,59 @@ function buildUserContent(prompt, imageDataUrl) {
     {
       type: 'image_url',
       image_url: {
-        url: imageDataUrl,
+        url: normalizedImageDataUrl,
       },
     },
   ];
 }
 
+function normalizeImageDataUrl(imageDataUrl) {
+  if (typeof imageDataUrl !== 'string') {
+    return '';
+  }
+  const trimmed = imageDataUrl.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) {
+    return `data:image/png;base64,${trimmed.replace(/\s+/g, '')}`;
+  }
+  return '';
+}
+
+function getImageMeta(imageDataUrl) {
+  const normalized = normalizeImageDataUrl(imageDataUrl);
+  if (!normalized) {
+    return { hasImage: false, mime: '', bytesApprox: 0 };
+  }
+  const mimeMatch = normalized.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+  const base64 = normalized.slice(normalized.indexOf(',') + 1);
+  const bytesApprox = Math.floor((base64.length * 3) / 4);
+  return {
+    hasImage: true,
+    mime: mimeMatch?.[1] || 'image/unknown',
+    bytesApprox,
+  };
+}
+
 async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
   try {
+    console.log('[catalog] request meta:', {
+      provider,
+      model: QIANWEN_MODEL,
+      image: getImageMeta(imageDataUrl),
+      promptPreview: prompt.slice(0, 120),
+    });
+    if (imageDataUrl && !/vl/i.test(QIANWEN_MODEL)) {
+      console.warn('[catalog] model may not be vision-capable for image input:', QIANWEN_MODEL);
+    }
+
     const data = await requestModel({
       provider,
-      maxTokens: 1200,
+      maxTokens: 2200,
       temperature: 0.1,
       messages: [
         {
@@ -359,10 +402,19 @@ async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
 
 async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta) {
   let resultText = '';
+  console.log('[catalog] stream request meta:', {
+    provider,
+    model: QIANWEN_MODEL,
+    image: getImageMeta(imageDataUrl),
+    promptPreview: prompt.slice(0, 120),
+  });
+  if (imageDataUrl && !/vl/i.test(QIANWEN_MODEL)) {
+    console.warn('[catalog] model may not be vision-capable for image input:', QIANWEN_MODEL);
+  }
 
   await requestModelStream({
     provider,
-    maxTokens: 1200,
+    maxTokens: 2200,
     temperature: 0.1,
     messages: [
       {
@@ -489,7 +541,7 @@ Return repaired JSON only.`;
 
     const data = await requestModel({
       provider,
-      maxTokens: 1200,
+      maxTokens: 2200,
       temperature: 0,
       messages: [
         {
@@ -624,8 +676,9 @@ const server = http.createServer(async (req, res) => {
         const prompt =
           typeof body.prompt === 'string' ? body.prompt.trim() : '';
         const provider = normalizeProvider(body.provider);
-        const imageDataUrl =
-          typeof body.imageDataUrl === 'string' ? body.imageDataUrl : '';
+        const imageDataUrl = normalizeImageDataUrl(
+          typeof body.imageDataUrl === 'string' ? body.imageDataUrl : '',
+        );
 
         if (!prompt) {
           sendJson(res, 400, { error: 'Prompt is required.' });

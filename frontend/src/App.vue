@@ -454,19 +454,9 @@ async function generateFromDonePayloadString() {
     return;
   }
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  const parsed = parseDonePayload(raw);
+  if (!parsed) {
     donePayloadError.value = 'JSON 解析失败，请检查 donePayload 格式。';
-    return;
-  }
-
-  const providedModelSpec = parsed?.modelSpec && typeof parsed.modelSpec === 'object'
-    ? parsed.modelSpec
-    : (parsed?.modelType ? parsed : null);
-  if (!providedModelSpec) {
-    donePayloadError.value = '找不到 modelSpec。请粘贴完整 donePayload JSON。';
     return;
   }
 
@@ -476,9 +466,9 @@ async function generateFromDonePayloadString() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt: typeof parsed?.prompt === 'string' && parsed.prompt.trim() ? parsed.prompt : 'from donePayload',
+        prompt: parsed.prompt,
         provider: 'qianwen',
-        modelSpec: providedModelSpec,
+        modelSpec: parsed.modelSpec,
         skipModelInference: true,
       }),
     });
@@ -536,6 +526,25 @@ async function generateFromDonePayloadString() {
   }
 }
 
+function parseDonePayload(raw: string): { prompt: string; modelSpec: any } | null {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const modelSpec = parsed?.modelSpec && typeof parsed.modelSpec === 'object'
+    ? parsed.modelSpec
+    : (parsed?.modelType ? parsed : null);
+  if (!modelSpec) {
+    return null;
+  }
+  return {
+    prompt: typeof parsed?.prompt === 'string' && parsed.prompt.trim() ? parsed.prompt : 'from donePayload',
+    modelSpec,
+  };
+}
+
 function generateModelStreamFromPrompt() {
   return generateModelStream({ reuseLastResult: false });
 }
@@ -548,6 +557,13 @@ function applyDirectScad() {
   const trimmed = directScad.value.trim();
   if (!trimmed) {
     requestError.value = '请输入 OpenSCAD 代码。';
+    return;
+  }
+
+  const parsedDonePayload = parseDonePayload(trimmed);
+  if (parsedDonePayload) {
+    donePayloadJsonInput.value = trimmed;
+    generateFromDonePayloadString();
     return;
   }
 

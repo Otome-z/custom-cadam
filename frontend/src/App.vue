@@ -70,6 +70,31 @@
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
         <p v-if="!requestError && lastPrompt" class="status">最近一次请求：{{ lastPrompt }}</p>
 
+        <section class="subpanel">
+          <div class="subpanel-header">
+            <h2>导出模型</h2>
+            <span>3ds Max 二次编辑</span>
+          </div>
+          <p class="status">支持 three.js 导出器格式，可直接下载后导入 3ds Max。</p>
+          <div class="export-row">
+            <select v-model="selectedExportFormat" class="parameter-input export-select">
+              <option v-for="option in exportFormatOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <button
+              class="primary-button"
+              type="button"
+              :disabled="!geometry || isExporting"
+              @click="downloadExportedModel"
+            >
+              {{ isExporting ? '导出中...' : '下载导出文件' }}
+            </button>
+          </div>
+          <p class="status">{{ selectedExportHint }}</p>
+          <p v-if="exportError" class="status status-error">{{ exportError }}</p>
+        </section>
+
         <section v-if="thinkingText" class="subpanel code-panel">
           <div class="subpanel-header">
             <h2>思考过程</h2>
@@ -158,6 +183,7 @@ import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
 import type { Parameter } from '@/types';
+import { exportPreviewGeometry, type ExportFormat } from '@/utils/exportGeometry';
 
 type StreamDonePayload = {
   prompt: string;
@@ -178,11 +204,26 @@ const thinkingText = ref('');
 const showThinking = ref(false);
 const imageDataUrl = ref('');
 const uploadedImageName = ref('');
+const exportError = ref('');
+const isExporting = ref(false);
+const selectedExportFormat = ref<ExportFormat>('obj');
 
 const { geometry, error: previewError, isCompiling } = useOpenScadPreview(code, parameters);
 
 const editableParameters = computed(() =>
   parameters.value.filter((parameter) => ['number', 'string', 'boolean'].includes(parameter.type)),
+);
+const exportFormatOptions: Array<{ value: ExportFormat; label: string; hint: string }> = [
+  { value: 'obj', label: 'OBJ（推荐 3ds Max）', hint: '兼容性最佳，适合导入后继续编辑材质与结构。' },
+  { value: 'stl-binary', label: 'STL Binary', hint: '适合几何体打印流程，几乎不包含材质信息。' },
+  { value: 'stl-ascii', label: 'STL ASCII', hint: '文本版 STL，文件更大但便于检查。' },
+  { value: 'ply-binary', label: 'PLY Binary', hint: '适合网格数据交换，常用于点云/扫描流程。' },
+  { value: 'ply-ascii', label: 'PLY ASCII', hint: '文本版 PLY，调试友好但文件较大。' },
+  { value: 'glb', label: 'GLB', hint: '单文件 glTF，便于传输；3ds Max 新版本可通过插件导入。' },
+  { value: 'gltf', label: 'glTF', hint: 'JSON + 资源格式，适合实时流程交换。' },
+];
+const selectedExportHint = computed(
+  () => exportFormatOptions.find((item) => item.value === selectedExportFormat.value)?.hint ?? '',
 );
 
 const codeLineCount = computed(() => (code.value ? code.value.split(/\r?\n/).length : 0));
@@ -190,6 +231,10 @@ const codeLineCount = computed(() => (code.value ? code.value.split(/\r?\n/).len
 
 watch(code, (nextCode) => {
   parameters.value = nextCode ? parseParameters(nextCode) : [];
+});
+
+watch(geometry, () => {
+  exportError.value = '';
 });
 
 async function generateModelStream() {
@@ -338,6 +383,31 @@ function setStringParameter(parameterName: string, event: Event) {
 function setBooleanParameter(parameterName: string, event: Event) {
   const target = event.target as HTMLInputElement;
   updateParameterValue(parameterName, target.checked);
+}
+
+async function downloadExportedModel() {
+  if (!geometry.value) {
+    exportError.value = '当前没有可导出的几何体，请先生成模型。';
+    return;
+  }
+
+  isExporting.value = true;
+  exportError.value = '';
+
+  try {
+    const { blob, extension } = await exportPreviewGeometry(geometry.value, selectedExportFormat.value);
+    const modelName = `model-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${modelName}.${extension}`;
+    link.click();
+    URL.revokeObjectURL(downloadUrl);
+  } catch (error) {
+    exportError.value = error instanceof Error ? error.message : '导出失败，请重试。';
+  } finally {
+    isExporting.value = false;
+  }
 }
 
 

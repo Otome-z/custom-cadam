@@ -18,11 +18,11 @@
         </button>
       </div>
     </div>
-    <div v-else-if="!geometry && !hasWovenCatalogTag" class="viewer-overlay viewer-overlay-idle">
+    <div v-else-if="!hasRenderableModel" class="viewer-overlay viewer-overlay-idle">
       <span>待生成模型</span>
     </div>
 
-    <div v-if="geometry || hasWovenCatalogTag" class="viewer-metrics">
+    <div v-if="hasRenderableModel" class="viewer-metrics">
       <span>{{ metricText.native }}</span>
     </div>
   </div>
@@ -40,6 +40,7 @@ const props = defineProps<{
   geometry: BufferGeometry | null;
   code: string;
   parameters: Parameter[];
+  modelSpec?: any | null;
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
@@ -63,6 +64,10 @@ const metricText = ref({
   native: 'Native: -',
 });
 const hasWovenCatalogTag = computed(() => props.code.includes('catalog_model: woven_yarn_sheet'));
+const isYarnPathCollection = computed(() => props.modelSpec?.modelType === 'yarn_path_collection');
+const hasRenderableModel = computed(
+  () => isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
+);
 
 function initScene() {
   if (!canvasHost.value) {
@@ -185,6 +190,17 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     modelGroup = null;
   }
 
+  if (isYarnPathCollection.value && props.modelSpec) {
+    modelGroup = createYarnPathCollectionGroup(props.modelSpec);
+    modelGroup.position.x = -36;
+    scene.add(modelGroup);
+    metricText.value = {
+      native: buildStatsLabel('Native', modelGroup, 'tube'),
+    };
+    fitCameraToMesh();
+    return;
+  }
+
   if (hasWovenCatalogTag.value) {
     modelGroup = createWovenTubeGroup(props.parameters);
     modelGroup.position.x = -36;
@@ -223,6 +239,171 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   };
 
   fitCameraToMesh();
+}
+
+function normalizeLinePoint(point: unknown): THREE.Vector3 | null {
+  if (!Array.isArray(point)) {
+    return null;
+  }
+
+  const x = Number(point[0]);
+  const y = Number(point[1]);
+  const z = Number(point.length >= 3 ? point[2] : 0);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+
+  return new THREE.Vector3(x, y, z);
+}
+
+function getLineNumber(line: Record<string, unknown>, key: string, fallback: number): number {
+  const value = Number(line[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function getLineColor(line: Record<string, unknown>, fallback: string): string {
+  const value = line.color;
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function createCurveFromLine(
+  line: Record<string, unknown>,
+  defaults: { pathSegments: number },
+): any | null {
+  const rawPoints = Array.isArray(line.points) ? line.points : [];
+  const points = rawPoints.map((point) => normalizeLinePoint(point)).filter((point): point is THREE.Vector3 => Boolean(point));
+  if (points.length < 2) {
+    return null;
+  }
+
+  const lineType = typeof line.type === 'string' ? line.type.trim() : 'smoothPolyline';
+  if (lineType === 'straight') {
+    return new THREE.LineCurve3(points[0], points[1]);
+  }
+
+  if (lineType === 'polyline') {
+    const curvePath = new (THREE as any).CurvePath();
+    for (let index = 0; index < points.length - 1; index += 1) {
+      curvePath.add(new THREE.LineCurve3(points[index], points[index + 1]));
+    }
+    return curvePath;
+  }
+
+  if (lineType === 'sine') {
+    const start = points[0];
+    const end = points[1];
+    const direction = new THREE.Vector3(end.x - start.x, end.y - start.y, end.z - start.z);
+    const length = Math.sqrt(direction.x ** 2 + direction.y ** 2 + direction.z ** 2);
+    if (length <= 0.0001) {
+      return new THREE.LineCurve3(start, end);
+    }
+    direction.set(direction.x / length, direction.y / length, direction.z / length);
+
+    const cross = (a: THREE.Vector3, b: THREE.Vector3) =>
+      new THREE.Vector3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+      );
+    const magnitude = (v: THREE.Vector3) => Math.sqrt(v.x ** 2 + v.y ** 2 + v.z ** 2);
+    const up = new THREE.Vector3(0, 0, 1);
+    let normal = cross(direction, up);
+    if (magnitude(normal) < 1e-3) {
+      normal = cross(direction, new THREE.Vector3(1, 0, 0));
+    }
+    const normalLength = Math.max(1e-6, magnitude(normal));
+    normal.set(normal.x / normalLength, normal.y / normalLength, normal.z / normalLength);
+
+    const sampleCount = Math.max(2, Math.round(getLineNumber(line, 'pathSegments', defaults.pathSegments)));
+    const amplitude = Math.max(0, getLineNumber(line, 'amplitude', 0));
+    const period = Math.max(0.1, getLineNumber(line, 'period', 8));
+    const sinePoints: THREE.Vector3[] = [];
+
+    for (let index = 0; index <= sampleCount; index += 1) {
+      const t = index / sampleCount;
+      const distance = t * length;
+      const basePoint = new THREE.Vector3(
+        start.x + direction.x * distance,
+        start.y + direction.y * distance,
+        start.z + direction.z * distance,
+      );
+      const offset = Math.sin((distance / period) * Math.PI * 2) * amplitude;
+      sinePoints.push(new THREE.Vector3(
+        basePoint.x + normal.x * offset,
+        basePoint.y + normal.y * offset,
+        basePoint.z + normal.z * offset,
+      ));
+    }
+
+    return new THREE.CatmullRomCurve3(sinePoints, false, 'centripetal');
+  }
+
+  if (lineType === 'bezier') {
+    if (points.length === 4) {
+      return new (THREE as any).CubicBezierCurve3(points[0], points[1], points[2], points[3]);
+    }
+    if (points.length === 3) {
+      return new (THREE as any).QuadraticBezierCurve3(points[0], points[1], points[2]);
+    }
+  }
+
+  return new THREE.CatmullRomCurve3(points, false, 'centripetal');
+}
+
+function createTubeMeshFromLine(
+  line: Record<string, unknown>,
+  defaults: { yarnDiameter: number; radialSegments: number; pathSegments: number; color: string },
+): THREE.Mesh | null {
+  const curve = createCurveFromLine(line, defaults);
+  if (!curve) {
+    return null;
+  }
+
+  const yarnDiameter = Math.max(0.1, getLineNumber(line, 'yarnDiameter', defaults.yarnDiameter));
+  const radialSegments = Math.max(12, Math.round(getLineNumber(line, 'radialSegments', defaults.radialSegments)));
+  const pathSegments = Math.max(2, Math.round(getLineNumber(line, 'pathSegments', defaults.pathSegments)));
+  const color = getLineColor(line, defaults.color);
+
+  const geometry = new THREE.TubeGeometry(curve as any, pathSegments, yarnDiameter / 2, radialSegments, false);
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.6,
+    metalness: 0.08,
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function createYarnPathCollectionGroup(modelSpec: any): THREE.Group {
+  const group = new THREE.Group();
+  const globalDefaults = modelSpec?.globalDefaults ?? {};
+  const defaults = {
+    yarnDiameter: Number(globalDefaults.yarnDiameter) || 1,
+    radialSegments: Number(globalDefaults.radialSegments) || 64,
+    pathSegments: Number(globalDefaults.pathSegments) || 80,
+    color: typeof globalDefaults.color === 'string' && globalDefaults.color.trim() ? globalDefaults.color.trim() : '#d9ddd0',
+  };
+
+  const lines = Array.isArray(modelSpec?.lines) ? modelSpec.lines : [];
+  lines.forEach((line: Record<string, unknown>, index: number) => {
+    if (!line || typeof line !== 'object') {
+      return;
+    }
+
+    const mesh = createTubeMeshFromLine(line, defaults);
+    if (!mesh) {
+      return;
+    }
+
+    (mesh as any).userData.lineId = typeof line.id === 'string' && line.id.trim() ? line.id.trim() : `line_${index + 1}`;
+    (mesh as any).userData.lineSpec = line;
+    group.add(mesh);
+  });
+
+  return group;
 }
 
 function buildStatsLabel(label: string, object: THREE.Object3D | BufferGeometry, normalMode: string) {
@@ -283,7 +464,7 @@ watch(
 );
 
 watch(
-  () => [props.code, JSON.stringify(props.parameters)],
+  () => [props.code, JSON.stringify(props.parameters), JSON.stringify(props.modelSpec)],
   () => {
     setGeometry(props.geometry);
   },

@@ -167,6 +167,7 @@
           :geometry="geometry"
           :code="code"
           :parameters="parameters"
+          :model-spec="modelSpec"
           :loading="isGenerating || isCompiling"
           :error="previewError"
           :show-recreate="Boolean(previewError)"
@@ -190,13 +191,14 @@ import { createWovenTubeGroup } from '@/utils/wovenGeometry';
 type StreamDonePayload = {
   prompt: string;
   code: string;
-  modelSpec?: { displayName?: string; modelType?: string; summary?: string } | null;
+  modelSpec?: any | null;
 };
 
 const activeMode = ref<'llm' | 'direct'>('llm');
 const prompt = ref('根据图片生成模型');
 const directScad = ref('');
 const code = ref('');
+const modelSpec = ref<any | null>(null);
 const parameters = ref<Parameter[]>([]);
 const isGenerating = ref(false);
 const requestError = ref('');
@@ -307,6 +309,7 @@ async function generateModelStream() {
         if (eventName === 'done') {
           const donePayload = payload as StreamDonePayload;
           code.value = donePayload.code;
+          modelSpec.value = donePayload.modelSpec ?? null;
           lastPrompt.value = donePayload.prompt;
           directScad.value = donePayload.code;
         }
@@ -333,6 +336,7 @@ function applyDirectScad() {
   requestError.value = '';
   thinkingText.value = '';
   code.value = trimmed;
+  modelSpec.value = null;
   lastPrompt.value = '直接 OpenSCAD 模式';
 }
 

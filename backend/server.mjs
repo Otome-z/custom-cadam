@@ -301,10 +301,17 @@ function buildUserContent(prompt, imageDataUrl) {
     return prompt;
   }
 
+  const imageFirstConstraint = [
+    'Image-first constraints:',
+    '1) Extract yarn lines from the full image extent (full-frame).',
+    '2) Text prompt only constrains local line rules, and must not reduce global line count from the image.',
+    '3) Return complete visible line groups, not a representative subset.',
+  ].join('\n');
+
   return [
     {
       type: 'text',
-      text: prompt,
+      text: `${imageFirstConstraint}\n\nUser prompt:\n${prompt}`,
     },
     {
       type: 'image_url',
@@ -518,11 +525,15 @@ async function repairCatalogModelSpec({
 Repair the result and return valid JSON only.
 
 Important:
+- Must expand yarn extraction across the full reference image (full-frame), not only a local area.
+- User text is only for local line-shape constraints (e.g., straight/smooth/zigzag, color/diameter hints), and must not shrink the global number of extracted lines.
 - If the image shows multiple independent yarn paths, output modelType = "yarn_path_collection".
 - If the image shows vertical straight strands and horizontal folded/wavy/interlaced strands, output yarn_path_collection.
 - Do not output yarn_sheet for this kind of image.
 - Do not output woven_yarn_sheet unless the image is a globally regular woven sheet with one shared parameter set.
 - Each visible yarn path must be one line item in lines[].
+- Do not return only a sample subset of lines; cover the full visible yarn set in the image.
+- If many strands are visible, lines[] must include many corresponding entries (not just a few).
 - Use supported line types only: straight, polyline, smoothPolyline, sine, bezier.
 - Every point must be [x, y, z].
 - lines must be a non-empty array if visible line paths exist.

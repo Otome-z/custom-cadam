@@ -100,7 +100,7 @@
             <button
               class="primary-button"
               type="button"
-              :disabled="(!geometry && !hasWovenCatalogTag && !isYarnPathCollection) || isExporting"
+              :disabled="(!geometry && !hasWovenCatalogTag && !isYarnPathCollection && !isWovenPathPattern) || isExporting"
               @click="downloadExportedModel"
             >
               {{ isExporting ? '导出中...' : '下载导出文件' }}
@@ -326,6 +326,7 @@ const selectedExportHint = computed(
 );
 const hasWovenCatalogTag = computed(() => code.value.includes('catalog_model: woven_yarn_sheet'));
 const isYarnPathCollection = computed(() => modelSpec.value?.modelType === 'yarn_path_collection');
+const isWovenPathPattern = computed(() => modelSpec.value?.modelType === 'woven_path_pattern');
 const yarnLines = computed(() => (Array.isArray(modelSpec.value?.lines) ? modelSpec.value.lines : []));
 const selectedLine = computed(() =>
   yarnLines.value.find((line: any) => line?.id === selectedLineId.value) ?? null,

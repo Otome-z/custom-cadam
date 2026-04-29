@@ -712,6 +712,7 @@ const server = http.createServer(async (req, res) => {
                 provider,
                 code: directCode,
                 modelSpec: normalizedProvidedModel,
+                thinkingText: '',
               });
               res.end();
               return;
@@ -720,11 +721,15 @@ const server = http.createServer(async (req, res) => {
           console.warn('[catalog] provided modelSpec invalid or failed to build, fallback to model inference');
         }
 
+        let thinkingText = '';
         const result = await generateOpenScadStream(
           prompt,
           provider,
           imageDataUrl,
           (delta) => {
+            if (delta?.type === 'thinking' && typeof delta.text === 'string') {
+              thinkingText += delta.text;
+            }
             sendSseEvent(res, 'delta', delta);
           },
         );
@@ -734,6 +739,7 @@ const server = http.createServer(async (req, res) => {
           provider,
           code: result.code,
           modelSpec: result.modelSpec,
+          thinkingText,
         });
         res.end();
       } catch (error) {

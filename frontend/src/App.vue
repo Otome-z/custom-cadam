@@ -113,9 +113,14 @@
         <section v-if="thinkingText" class="subpanel code-panel">
           <div class="subpanel-header">
             <h2>思考过程</h2>
-            <button class="ghost-button compact" type="button" @click="showThinking = !showThinking">
-              {{ showThinking ? '隐藏' : '展示' }}
-            </button>
+            <div class="button-row">
+              <button class="ghost-button compact" type="button" @click="showThinking = !showThinking">
+                {{ showThinking ? '收起' : '展开' }}
+              </button>
+              <button class="ghost-button compact" type="button" @click="downloadThinkingText">
+                下载 TXT
+              </button>
+            </div>
           </div>
           <pre v-if="showThinking" class="code-block">{{ thinkingText }}</pre>
         </section>
@@ -283,6 +288,7 @@ type StreamDonePayload = {
   prompt: string;
   code: string;
   modelSpec?: any | null;
+  thinkingText?: string;
 };
 
 const activeMode = ref<'llm' | 'direct'>('llm');
@@ -414,7 +420,9 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
         const payload = JSON.parse(dataMatch[1]);
 
         if (eventName === 'delta') {
-          // ignore thinking deltas; only keep final result
+          if (payload?.type === 'thinking' && typeof payload?.text === 'string') {
+            thinkingText.value += payload.text;
+          }
           continue;
         }
 
@@ -428,6 +436,9 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
           }
           lastPrompt.value = donePayload.prompt;
           directScad.value = donePayload.code;
+          if (typeof donePayload.thinkingText === 'string') {
+            thinkingText.value = donePayload.thinkingText;
+          }
         }
 
         if (eventName === 'error') {
@@ -513,6 +524,9 @@ async function generateFromDonePayloadString() {
           }
           lastPrompt.value = donePayload.prompt;
           directScad.value = donePayload.code;
+          if (typeof donePayload.thinkingText === 'string') {
+            thinkingText.value = donePayload.thinkingText;
+          }
         }
 
         if (eventName === 'error') {
@@ -698,6 +712,19 @@ function removeLinePoint(lineId: string, pointIndex: number) {
       return { ...line, points };
     }),
   };
+}
+
+function downloadThinkingText() {
+  if (!thinkingText.value.trim()) {
+    return;
+  }
+  const blob = new Blob([thinkingText.value], { type: 'text/plain;charset=utf-8' });
+  const downloadUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = `thinking-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+  link.click();
+  URL.revokeObjectURL(downloadUrl);
 }
 
 async function downloadExportedModel() {

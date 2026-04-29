@@ -320,7 +320,7 @@ Rules:
 - Always map the user request to one of the supported model types.
 - Do not output custom_scad.
 - If the input includes an image, first extract visible yarn centerlines / line paths.
-- If the image shows a structured woven yarn diagram with straight warp strands and paired horizontal folded weft strands, prefer modelType = "woven_path_pattern".
+- If the input includes an image, ALWAYS prioritize per-line extraction and output modelType = "yarn_path_collection".
 - In this woven pattern, horizontal weft strands are NOT sine waves; they are rounded-zigzag / stepped polyline paths.
 - Their local shape is: P0 ---- P1, then diagonal transition, then P2 ---- P3.
 - Use weftPairs.shape = "rounded-zigzag".
@@ -328,11 +328,12 @@ Rules:
 - Do not flatten paired interlaced weft structure into independent smoothPolyline grid when image clearly shows interlacing.
 - Use crossing.mode = "alternate" and crossing.height > 0 for over-under weaving.
 - Use highlight.weftIndex and highlight.color for yellow strand.
-- Use yarn_path_collection for freeform unrelated line sketches; use woven_path_pattern for repeated regular woven path diagrams.
-- If an image contains multiple distinct yarn paths, output modelType = "yarn_path_collection".
-- If an image contains vertical straight strands and horizontal folded / wavy / interlaced strands, MUST output yarn_path_collection.
+- Use yarn_path_collection for image-driven generation, including regular repeated woven diagrams; represent each visible yarn as one line item.
+- If an image contains multiple distinct yarn paths, output modelType = "yarn_path_collection" (required).
+- If an image contains vertical straight strands and horizontal folded / wavy / interlaced strands, MUST output yarn_path_collection and split every strand into lines[].
 - Do not choose yarn_sheet when image contains both straight vertical yarns and folded / wavy / interlaced horizontal yarns.
 - Do not choose woven_yarn_sheet unless user explicitly requests a globally regular woven sheet with one shared parameter set.
+- For image-based generation, do not output woven_path_pattern; convert visual structures into explicit per-line yarn_path_collection lines[].
 - If ambiguous between global sheet model and multi-line path model, prefer yarn_path_collection.
 - For yarn_path_collection, each visible yarn path must be one item in lines[].
 - Do not merge multiple yarn paths into global parameters.
@@ -346,7 +347,7 @@ Rules:
 - For a path like P0----P1 then diagonal turn then P2----P3, output ONE smoothPolyline with points [P0,P1,P2,P3], not multiple lines.
 - For a highlighted yellow strand, output a separate line with yellow color such as "#f5e642".
 - If image resembles technical yarn diagram / shoe upper texture path / yarn routing / wave-line / polyline / local interlaced path, prefer yarn_path_collection.
-- Image-specific guidance: when the reference image has many vertical straight yarns, horizontal folded or wavy yarns, paired horizontal interlaced strands, and one highlighted yellow strand, output yarn_path_collection.
+- Image-specific guidance: when the reference image has many vertical straight yarns, horizontal folded or wavy yarns, paired horizontal interlaced strands, and one highlighted yellow strand, output yarn_path_collection with separate vertical_*, horizontal_*, and highlight_yellow lines.
 - Requests for parallel yarn rows, yarn surfaces made from side-by-side strands, or simple bundles should map to straight_yarn_bundle.
 - Only choose yarn_sheet for simple rows of mostly parallel straight yarns with no obvious independent path variation.
 - Only choose woven_yarn_sheet for regular full woven grids where warp/weft counts, spacing, and wave period can be shared globally.
@@ -576,11 +577,7 @@ export function fallbackCatalogModel(promptText = '', options = {}) {
   const lineHint = /(折线|波浪线|线条|路径|纹路|曲线|\bp0\b|\bp1\b|\bp2\b|\bp3\b|path|line|polyline|wave|route)/i.test(promptText);
   const genericImagePrompt = /(根据图片生成模型|按图片生成|参考图片生成模型|generate from image)/i.test(promptText);
 
-  if (hasImage && !lineHint && (!explicitGlobalSheet || genericImagePrompt)) {
-    return buildFallbackWovenPathPattern();
-  }
-
-  if (hasImage && (!explicitGlobalSheet || lineHint || genericImagePrompt)) {
+  if (hasImage) {
     return buildFallbackYarnPathCollection();
   }
 

@@ -18,12 +18,22 @@
         </button>
       </div>
     </div>
-    <div v-else-if="!geometry && !hasWovenCatalogTag" class="viewer-overlay viewer-overlay-idle">
+    <div v-else-if="!hasRenderableModel" class="viewer-overlay viewer-overlay-idle">
       <span>待生成模型</span>
     </div>
 
-    <div v-if="geometry || hasWovenCatalogTag" class="viewer-metrics">
+    <div v-if="hasRenderableModel" class="viewer-metrics">
       <span>{{ metricText.native }}</span>
+    </div>
+    <div v-if="isYarnPathCollection" class="viewer-selection-panel">
+      <template v-if="selectedLineSpec">
+        <div>Selected: {{ selectedLineSpec.id }}</div>
+        <div>{{ selectedLineSpec.name || '-' }}</div>
+        <div>type: {{ selectedLineSpec.type || '-' }}</div>
+      </template>
+      <template v-else>
+        <div>未选中线条</div>
+      </template>
     </div>
   </div>
 </template>
@@ -40,13 +50,11 @@ const props = defineProps<{
   geometry: BufferGeometry | null;
   code: string;
   parameters: Parameter[];
+  modelSpec?: any | null;
+  selectedLineId?: string | null;
   loading: boolean;
   error: Error | null;
   showRecreate?: boolean;
-}>();
-
-defineEmits<{
-  recreate: [];
 }>();
 
 const canvasHost = ref<HTMLDivElement | null>(null);
@@ -59,10 +67,28 @@ let modelMesh: Mesh | null = null;
 let modelGroup: THREE.Group | null = null;
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
+const emit = defineEmits<{
+  recreate: [];
+  'update:selectedLineId': [value: string | null];
+}>();
+const selectedLineId = ref<string | null>(null);
+const pointerDownPos = ref<{ x: number; y: number } | null>(null);
+const raycaster = new (THREE as any).Raycaster();
 const metricText = ref({
   native: 'Native: -',
 });
 const hasWovenCatalogTag = computed(() => props.code.includes('catalog_model: woven_yarn_sheet'));
+const isWovenPathPattern = computed(() => props.modelSpec?.modelType === 'woven_path_pattern');
+const isYarnPathCollection = computed(() => props.modelSpec?.modelType === 'yarn_path_collection');
+const hasRenderableModel = computed(
+  () => isWovenPathPattern.value || isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
+);
+const selectedLineSpec = computed(() => {
+  if (!isYarnPathCollection.value || !Array.isArray(props.modelSpec?.lines)) {
+    return null;
+  }
+  return props.modelSpec.lines.find((line: any) => line?.id === selectedLineId.value) ?? null;
+});
 
 function initScene() {
   if (!canvasHost.value) {
@@ -114,6 +140,8 @@ function initScene() {
 
   resizeObserver = new ResizeObserver(() => resizeRenderer());
   resizeObserver.observe(canvasHost.value);
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  renderer.domElement.addEventListener('pointerup', onPointerUp);
   resizeRenderer();
   animate();
 }
@@ -185,6 +213,30 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     modelGroup = null;
   }
 
+  if (isWovenPathPattern.value && props.modelSpec) {
+    modelGroup = createWovenPathPatternGroup(props.modelSpec);
+    modelGroup.position.x = -36;
+    scene.add(modelGroup);
+    metricText.value = {
+      native: buildStatsLabel('Native', modelGroup, 'woven_path_pattern'),
+    };
+    fitCameraToMesh();
+    return;
+  }
+
+  if (isYarnPathCollection.value && props.modelSpec) {
+    modelGroup = createYarnPathCollectionGroup(props.modelSpec);
+    modelGroup.position.x = -36;
+    scene.add(modelGroup);
+    metricText.value = {
+      native: buildStatsLabel('Native', modelGroup, 'tube'),
+    };
+    syncSelectedLineAfterRender();
+    updateLineHighlight();
+    fitCameraToMesh();
+    return;
+  }
+
   if (hasWovenCatalogTag.value) {
     modelGroup = createWovenTubeGroup(props.parameters);
     modelGroup.position.x = -36;
@@ -223,6 +275,397 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
   };
 
   fitCameraToMesh();
+}
+
+function onPointerDown(event: PointerEvent) {
+  pointerDownPos.value = { x: event.clientX, y: event.clientY };
+}
+
+function onPointerUp(event: PointerEvent) {
+  if (!isYarnPathCollection.value || !renderer || !camera || !modelGroup || !pointerDownPos.value) {
+    return;
+  }
+
+  const dx = event.clientX - pointerDownPos.value.x;
+  const dy = event.clientY - pointerDownPos.value.y;
+  pointerDownPos.value = null;
+  if (Math.sqrt(dx * dx + dy * dy) > 4) {
+    return;
+  }
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  const pointer = {
+    x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  };
+  raycaster.setFromCamera(pointer, camera);
+  const intersects = raycaster.intersectObjects((modelGroup as any).children || [], true);
+  const hit = intersects.find((item: any) => item.object?.userData?.lineId);
+  setSelectedLineId(hit?.object?.userData?.lineId ?? null);
+}
+
+function setSelectedLineId(nextId: string | null) {
+  selectedLineId.value = nextId;
+  emit('update:selectedLineId', nextId);
+  updateLineHighlight();
+}
+
+function syncSelectedLineAfterRender() {
+  if (!modelGroup) {
+    setSelectedLineId(null);
+    return;
+  }
+
+  if (!selectedLineId.value) {
+    return;
+  }
+
+  let exists = false;
+  modelGroup.traverse((child) => {
+    const mesh = child as any;
+    if (mesh?.isMesh && mesh.userData?.lineId === selectedLineId.value) {
+      exists = true;
+    }
+  });
+  if (!exists) {
+    setSelectedLineId(null);
+  }
+}
+
+function updateLineHighlight() {
+  if (!modelGroup) {
+    return;
+  }
+
+  modelGroup.traverse((child) => {
+    const mesh = child as any;
+    if (!mesh?.isMesh || !mesh.material) {
+      return;
+    }
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const isSelected = mesh.userData?.lineId && mesh.userData.lineId === selectedLineId.value;
+    materials.forEach((material: any) => {
+      if (material?.color?.set && mesh.userData?.baseColor) {
+        material.color.set(mesh.userData.baseColor);
+      }
+      if (material?.emissive?.set) {
+        if (isSelected) {
+          material.emissive.set('#88f0c2');
+          material.emissiveIntensity = 0.35;
+        } else {
+          material.emissive.set('#000000');
+          material.emissiveIntensity = 0;
+        }
+      } else if (isSelected && material?.color?.set) {
+        material.color.set('#88f0c2');
+      }
+    });
+  });
+}
+
+function normalizeLinePoint(point: unknown): THREE.Vector3 | null {
+  if (!Array.isArray(point)) {
+    return null;
+  }
+
+  const x = Number(point[0]);
+  const y = Number(point[1]);
+  const z = Number(point.length >= 3 ? point[2] : 0);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+
+  return new THREE.Vector3(x, y, z);
+}
+
+function getLineNumber(line: Record<string, unknown>, key: string, fallback: number): number {
+  const value = Number(line[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function getLineColor(line: Record<string, unknown>, fallback: string): string {
+  const value = line.color;
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function createCurveFromLine(
+  line: Record<string, unknown>,
+  defaults: { pathSegments: number },
+): any | null {
+  const rawPoints = Array.isArray(line.points) ? line.points : [];
+  const points = rawPoints.map((point) => normalizeLinePoint(point)).filter((point): point is THREE.Vector3 => Boolean(point));
+  if (points.length < 2) {
+    return null;
+  }
+
+  const lineType = typeof line.type === 'string' ? line.type.trim() : 'smoothPolyline';
+  if (lineType === 'straight') {
+    return new THREE.LineCurve3(points[0], points[1]);
+  }
+
+  if (lineType === 'polyline') {
+    const curvePath = new (THREE as any).CurvePath();
+    for (let index = 0; index < points.length - 1; index += 1) {
+      curvePath.add(new THREE.LineCurve3(points[index], points[index + 1]));
+    }
+    return curvePath;
+  }
+
+  if (lineType === 'sine') {
+    const start = points[0];
+    const end = points[1];
+    const direction = new THREE.Vector3(end.x - start.x, end.y - start.y, end.z - start.z);
+    const length = Math.sqrt(direction.x ** 2 + direction.y ** 2 + direction.z ** 2);
+    if (length <= 0.0001) {
+      return new THREE.LineCurve3(start, end);
+    }
+    direction.set(direction.x / length, direction.y / length, direction.z / length);
+
+    const cross = (a: THREE.Vector3, b: THREE.Vector3) =>
+      new THREE.Vector3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+      );
+    const magnitude = (v: THREE.Vector3) => Math.sqrt(v.x ** 2 + v.y ** 2 + v.z ** 2);
+    const up = new THREE.Vector3(0, 0, 1);
+    let normal = cross(direction, up);
+    if (magnitude(normal) < 1e-3) {
+      normal = cross(direction, new THREE.Vector3(1, 0, 0));
+    }
+    const normalLength = Math.max(1e-6, magnitude(normal));
+    normal.set(normal.x / normalLength, normal.y / normalLength, normal.z / normalLength);
+
+    const sampleCount = Math.max(2, Math.round(getLineNumber(line, 'pathSegments', defaults.pathSegments)));
+    const amplitude = Math.max(0, getLineNumber(line, 'amplitude', 0));
+    const period = Math.max(0.1, getLineNumber(line, 'period', 8));
+    const sinePoints: THREE.Vector3[] = [];
+
+    for (let index = 0; index <= sampleCount; index += 1) {
+      const t = index / sampleCount;
+      const distance = t * length;
+      const basePoint = new THREE.Vector3(
+        start.x + direction.x * distance,
+        start.y + direction.y * distance,
+        start.z + direction.z * distance,
+      );
+      const offset = Math.sin((distance / period) * Math.PI * 2) * amplitude;
+      sinePoints.push(new THREE.Vector3(
+        basePoint.x + normal.x * offset,
+        basePoint.y + normal.y * offset,
+        basePoint.z + normal.z * offset,
+      ));
+    }
+
+    return new THREE.CatmullRomCurve3(sinePoints, false, 'centripetal');
+  }
+
+  if (lineType === 'bezier') {
+    if (points.length === 4) {
+      return new (THREE as any).CubicBezierCurve3(points[0], points[1], points[2], points[3]);
+    }
+    if (points.length === 3) {
+      return new (THREE as any).QuadraticBezierCurve3(points[0], points[1], points[2]);
+    }
+  }
+
+  return new THREE.CatmullRomCurve3(points, false, 'centripetal');
+}
+
+function createTubeMeshFromLine(
+  line: Record<string, unknown>,
+  defaults: { yarnDiameter: number; radialSegments: number; pathSegments: number; color: string },
+): THREE.Mesh | null {
+  const curve = createCurveFromLine(line, defaults);
+  if (!curve) {
+    return null;
+  }
+
+  const yarnDiameter = Math.max(0.1, getLineNumber(line, 'yarnDiameter', defaults.yarnDiameter));
+  const radialSegments = Math.max(12, Math.round(getLineNumber(line, 'radialSegments', defaults.radialSegments)));
+  const pathSegments = Math.max(2, Math.round(getLineNumber(line, 'pathSegments', defaults.pathSegments)));
+  const color = getLineColor(line, defaults.color);
+
+  const geometry = new THREE.TubeGeometry(curve as any, pathSegments, yarnDiameter / 2, radialSegments, false);
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.6,
+    metalness: 0.08,
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  (mesh as any).userData.baseColor = color;
+  return mesh;
+}
+
+function createYarnPathCollectionGroup(modelSpec: any): THREE.Group {
+  const group = new THREE.Group();
+  const globalDefaults = modelSpec?.globalDefaults ?? {};
+  const defaults = {
+    yarnDiameter: Number(globalDefaults.yarnDiameter) || 1,
+    radialSegments: Number(globalDefaults.radialSegments) || 64,
+    pathSegments: Number(globalDefaults.pathSegments) || 80,
+    color: typeof globalDefaults.color === 'string' && globalDefaults.color.trim() ? globalDefaults.color.trim() : '#d9ddd0',
+  };
+
+  const lines = Array.isArray(modelSpec?.lines) ? modelSpec.lines : [];
+  lines.forEach((line: Record<string, unknown>, index: number) => {
+    if (!line || typeof line !== 'object') {
+      return;
+    }
+
+    const mesh = createTubeMeshFromLine(line, defaults);
+    if (!mesh) {
+      return;
+    }
+
+    (mesh as any).userData.lineId = typeof line.id === 'string' && line.id.trim() ? line.id.trim() : `line_${index + 1}`;
+    (mesh as any).userData.lineSpec = line;
+    group.add(mesh);
+  });
+
+  return group;
+}
+
+function createWovenPathPatternGroup(modelSpec: any): THREE.Group {
+  const group = new THREE.Group();
+  const defaults = modelSpec?.globalDefaults ?? {};
+  const warp = modelSpec?.warp ?? {};
+  const weftPairs = modelSpec?.weftPairs ?? {};
+  const crossing = modelSpec?.crossing ?? {};
+  const highlight = modelSpec?.highlight ?? {};
+  const transform = modelSpec?.transform ?? {};
+
+  const yarnDiameter = Math.max(0.1, Number(defaults.yarnDiameter) || 1);
+  const radialSegments = Math.max(12, Math.round(Number(defaults.radialSegments) || 64));
+  const pathSegments = Math.max(2, Math.round(Number(defaults.pathSegments) || 120));
+
+  const warpCount = Math.max(1, Math.round(Number(warp.count) || 10));
+  const warpSpacing = Number(warp.spacing) || 8;
+  const warpLength = Number(warp.length) || 130;
+  const warpColor = typeof defaults.warpColor === 'string' ? defaults.warpColor : '#d9ddd0';
+
+  for (let index = 0; index < warpCount; index += 1) {
+    const x = index * warpSpacing;
+    const p1 = new THREE.Vector3(x, 0, 0);
+    const p2 = new THREE.Vector3(x, warpLength, 0);
+    const curve = new THREE.LineCurve3(p1, p2);
+    const geometry = new THREE.TubeGeometry(curve, pathSegments, yarnDiameter / 2, radialSegments, false);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: warpColor, roughness: 0.6, metalness: 0.08 }));
+    (mesh as any).userData = { kind: 'warp', groupId: 'warp_group', lineId: `warp_${index}` };
+    group.add(mesh);
+  }
+
+  const pairCount = Math.max(1, Math.round(Number(weftPairs.count) || 8));
+  const pairSpacing = Number(weftPairs.spacing) || 10;
+  const pairOffset = Number(weftPairs.pairOffset) || 3;
+  const length = Number(weftPairs.length) || 150;
+  const stepLength = Number(weftPairs.stepLength) || 28;
+  const stepDrop = Number(weftPairs.stepDrop) || 8;
+  const cornerRadius = Number(weftPairs.cornerRadius) || 4;
+  const crossingHeight = Math.max(0, Number(crossing.height) || 2);
+  const crossingStart = /under/i.test(String(crossing.start || 'over')) ? 'under' : 'over';
+  const weftColor = typeof defaults.weftColor === 'string' ? defaults.weftColor : '#ffffff';
+  const highlightColor = typeof highlight.color === 'string'
+    ? highlight.color
+    : (typeof defaults.highlightColor === 'string' ? defaults.highlightColor : '#f5e642');
+  const highlightIndex = Math.max(0, Math.round(Number(highlight.weftIndex) || 0));
+  const highlightRole = /lower/i.test(String(highlight.pairRole || 'upper')) ? 'lower' : 'upper';
+
+  for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+    const baseY = pairIndex * pairSpacing;
+    const roles: Array<'upper' | 'lower'> = ['upper', 'lower'];
+    roles.forEach((role) => {
+      const y = baseY + (role === 'upper' ? 0 : pairOffset);
+      const roleStart = role === 'upper' ? crossingStart : (crossingStart === 'over' ? 'under' : 'over');
+      const points = createRoundedZigzagPoints({
+        x0: 0,
+        y,
+        length,
+        stepLength,
+        stepDrop,
+        crossingHeight,
+        start: roleStart,
+      });
+      const curvePath = new (THREE as any).CurvePath();
+      for (let i = 0; i < points.length - 1; i += 1) {
+        curvePath.add(new THREE.LineCurve3(points[i], points[i + 1]));
+      }
+      const color = pairIndex === highlightIndex && role === highlightRole ? highlightColor : weftColor;
+      const geometry = new THREE.TubeGeometry(curvePath as any, Math.max(pathSegments, points.length * 4), yarnDiameter / 2, radialSegments, false);
+      const mesh = new THREE.Mesh(
+        geometry,
+        new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.08 }),
+      );
+      (mesh as any).userData = {
+        kind: 'weft',
+        groupId: `weft_group_${pairIndex}`,
+        pairId: `pair_${pairIndex}`,
+        lineId: `weft_${pairIndex}_${role}`,
+        cornerRadius,
+      };
+      group.add(mesh);
+    });
+  }
+
+  const rotationZ = Number(transform.rotationZ) || 0;
+  const scaleX = Number(transform.scaleX) || 1;
+  const scaleY = Number(transform.scaleY) || 1;
+  const scaleZ = Number(transform.scaleZ) || 1;
+  if ((group as any).rotation) {
+    (group as any).rotation.z = rotationZ * Math.PI / 180;
+  }
+  if ((group as any).scale?.set) {
+    (group as any).scale.set(scaleX, scaleY, scaleZ);
+  }
+  return group;
+}
+
+function createRoundedZigzagPoints({
+  x0,
+  y,
+  length,
+  stepLength,
+  stepDrop,
+  crossingHeight,
+  start,
+}: {
+  x0: number;
+  y: number;
+  length: number;
+  stepLength: number;
+  stepDrop: number;
+  crossingHeight: number;
+  start: 'over' | 'under';
+}): THREE.Vector3[] {
+  const points: THREE.Vector3[] = [];
+  let x = x0;
+  let currentY = y;
+  let crossingIndex = 0;
+  let direction = 1;
+  points.push(new THREE.Vector3(x, currentY, zByCrossing(crossingIndex, start, crossingHeight)));
+  while (x < x0 + length) {
+    x += stepLength;
+    crossingIndex += 1;
+    points.push(new THREE.Vector3(Math.min(x, x0 + length), currentY, zByCrossing(crossingIndex, start, crossingHeight)));
+    if (x >= x0 + length) {
+      break;
+    }
+    x += stepDrop;
+    currentY += stepDrop * direction;
+    crossingIndex += 1;
+    points.push(new THREE.Vector3(Math.min(x, x0 + length), currentY, zByCrossing(crossingIndex, start, crossingHeight)));
+    direction *= -1;
+  }
+  return points;
+}
+
+function zByCrossing(index: number, start: 'over' | 'under', height: number): number {
+  const even = index % 2 === 0;
+  const over = start === 'over' ? even : !even;
+  return over ? height : -height;
 }
 
 function buildStatsLabel(label: string, object: THREE.Object3D | BufferGeometry, normalMode: string) {
@@ -283,15 +726,30 @@ watch(
 );
 
 watch(
-  () => [props.code, JSON.stringify(props.parameters)],
+  () => [props.code, JSON.stringify(props.parameters), JSON.stringify(props.modelSpec)],
   () => {
     setGeometry(props.geometry);
   },
 );
 
+watch(
+  () => props.selectedLineId ?? null,
+  (nextId) => {
+    selectedLineId.value = nextId;
+    updateLineHighlight();
+  },
+  { immediate: true },
+);
+
+defineExpose({
+  getRenderObject: () => modelGroup || modelMesh,
+});
+
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
+  renderer?.domElement.removeEventListener('pointerdown', onPointerDown);
+  renderer?.domElement.removeEventListener('pointerup', onPointerUp);
   controls?.dispose();
   if (modelMesh) {
     (modelMesh.material as THREE.Material).dispose();
@@ -318,6 +776,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #d9e6a8;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.viewer-selection-panel {
+  position: absolute;
+  left: 12px;
+  top: 12px;
   padding: 8px 10px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.45);

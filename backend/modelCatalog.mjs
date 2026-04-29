@@ -1,4 +1,23 @@
 const MODEL_CATALOG = {
+  yarn_path_collection: {
+    displayName: 'Yarn Path Collection',
+    description: 'A line-based yarn model where each yarn path is an independent line spec.',
+    parameters: {},
+    buildCode: (params, modelSpec) => `// catalog_model: yarn_path_collection
+// This model is rendered by native three.js from modelSpec.lines.
+// line_count = ${Array.isArray(modelSpec?.lines) ? modelSpec.lines.length : 0};
+`,
+  },
+  woven_path_pattern: {
+    displayName: 'Woven Path Pattern',
+    description: 'A structured woven yarn path pattern with straight warp strands, paired rounded-zigzag weft strands, and over-under crossing rules.',
+    parameters: {},
+    buildCode: (params, modelSpec) => `// catalog_model: woven_path_pattern
+// This model is rendered by native three.js from modelSpec.
+// warp_count = ${modelSpec?.warp?.count ?? 0};
+// weft_pair_count = ${modelSpec?.weftPairs?.count ?? 0};
+`,
+  },
   straight_yarn_bundle: {
     displayName: 'Straight Yarn Bundle',
     description: 'Parallel cylindrical yarn strands arranged side by side.',
@@ -300,9 +319,38 @@ ${serializeCatalogForPrompt()}
 Rules:
 - Always map the user request to one of the supported model types.
 - Do not output custom_scad.
+- If the input includes an image, first extract visible yarn centerlines / line paths.
+- If the input includes an image, ALWAYS prioritize per-line extraction and output modelType = "yarn_path_collection".
+- In this woven pattern, horizontal weft strands are NOT sine waves; they are rounded-zigzag / stepped polyline paths.
+- Their local shape is: P0 ---- P1, then diagonal transition, then P2 ---- P3.
+- Use weftPairs.shape = "rounded-zigzag".
+- Do not represent these weft strands as type="sine" unless user explicitly asks sinusoidal waves.
+- Do not flatten paired interlaced weft structure into independent smoothPolyline grid when image clearly shows interlacing.
+- Use crossing.mode = "alternate" and crossing.height > 0 for over-under weaving.
+- Use highlight.weftIndex and highlight.color for yellow strand.
+- Use yarn_path_collection for image-driven generation, including regular repeated woven diagrams; represent each visible yarn as one line item.
+- If an image contains multiple distinct yarn paths, output modelType = "yarn_path_collection" (required).
+- If an image contains vertical straight strands and horizontal folded / wavy / interlaced strands, MUST output yarn_path_collection and split every strand into lines[].
+- Do not choose yarn_sheet when image contains both straight vertical yarns and folded / wavy / interlaced horizontal yarns.
+- Do not choose woven_yarn_sheet unless user explicitly requests a globally regular woven sheet with one shared parameter set.
+- For image-based generation, do not output woven_path_pattern; convert visual structures into explicit per-line yarn_path_collection lines[].
+- If ambiguous between global sheet model and multi-line path model, prefer yarn_path_collection.
+- For yarn_path_collection, each visible yarn path must be one item in lines[].
+- Do not merge multiple yarn paths into global parameters.
+- globalDefaults are defaults only. Each line can override yarnDiameter, radialSegments, pathSegments, color, amplitude, period, cornerRadius.
+- Choose line type per line:
+  - straight: horizontal / vertical / diagonal straight line
+  - polyline: multi-segment sharp-corner piecewise straight path
+  - smoothPolyline: multi-segment path with rounded corners / smooth turning
+  - sine: continuous wave-like line
+  - bezier: arbitrary smooth curve
+- For a path like P0----P1 then diagonal turn then P2----P3, output ONE smoothPolyline with points [P0,P1,P2,P3], not multiple lines.
+- For a highlighted yellow strand, output a separate line with yellow color such as "#f5e642".
+- If image resembles technical yarn diagram / shoe upper texture path / yarn routing / wave-line / polyline / local interlaced path, prefer yarn_path_collection.
+- Image-specific guidance: when the reference image has many vertical straight yarns, horizontal folded or wavy yarns, paired horizontal interlaced strands, and one highlighted yellow strand, output yarn_path_collection with separate vertical_*, horizontal_*, and highlight_yellow lines.
 - Requests for parallel yarn rows, yarn surfaces made from side-by-side strands, or simple bundles should map to straight_yarn_bundle.
-- Requests mentioning sheet/plane/fabric-like layer should map to yarn_sheet.
-- Requests mentioning woven cloth, warp/weft, interlaced wave yarns, 经纬编织, or sinusoidal weft should map to woven_yarn_sheet.
+- Only choose yarn_sheet for simple rows of mostly parallel straight yarns with no obvious independent path variation.
+- Only choose woven_yarn_sheet for regular full woven grids where warp/weft counts, spacing, and wave period can be shared globally.
 - For woven_yarn_sheet, set amplitude to 0 unless the user (or reference image) clearly indicates sinusoidal/wavy weft paths.
 - Requests for twisted bundles or rope-like spirals should map to twisted_yarn_bundle.
 - Requests for a single bent yarn should map to curved_yarn_path.
@@ -312,6 +360,80 @@ Rules:
 - Only include parameter names that belong to the chosen model type.
 
 Return shape:
+Line-based:
+{
+  "modelType": "yarn_path_collection",
+  "summary": "short plain-language summary",
+  "globalDefaults": {
+    "yarnDiameter": <number_if_known>,
+    "radialSegments": <number_if_known>,
+    "pathSegments": <number_if_known>,
+    "color": "<color_if_known>"
+  },
+  "lines": [
+    {
+      "id": "line_1",
+      "name": "Line 1",
+      "type": "smoothPolyline",
+      "points": [[0, 0, 0], [50, 0, 0], [70, -20, 0], [120, -20, 0]],
+      "yarnDiameter": <number_if_known>,
+      "radialSegments": <number_if_known>,
+      "pathSegments": <number_if_known>,
+      "color": "<color_if_known>",
+      "amplitude": <number_if_known>,
+      "period": <number_if_known>,
+      "cornerRadius": <number_if_known>
+    }
+  ]
+}
+
+Structured woven path pattern:
+{
+  "modelType": "woven_path_pattern",
+  "summary": "short summary",
+  "globalDefaults": {
+    "yarnDiameter": 1,
+    "radialSegments": 64,
+    "pathSegments": 120,
+    "warpColor": "#d9ddd0",
+    "weftColor": "#ffffff",
+    "highlightColor": "#f5e642"
+  },
+  "warp": {
+    "count": 10,
+    "spacing": 8,
+    "length": 130,
+    "tilt": -12
+  },
+  "weftPairs": {
+    "count": 8,
+    "spacing": 10,
+    "pairOffset": 3,
+    "length": 150,
+    "shape": "rounded-zigzag",
+    "stepLength": 28,
+    "stepDrop": 8,
+    "cornerRadius": 4
+  },
+  "crossing": {
+    "mode": "alternate",
+    "height": 2,
+    "start": "over"
+  },
+  "highlight": {
+    "weftIndex": 4,
+    "pairRole": "upper",
+    "color": "#f5e642"
+  },
+  "transform": {
+    "rotationZ": -18,
+    "scaleX": 1,
+    "scaleY": 0.85,
+    "scaleZ": 1
+  }
+}
+
+Legacy catalog model:
 {
   "modelType": "straight_yarn_bundle | yarn_sheet | woven_yarn_sheet | twisted_yarn_bundle | curved_yarn_path | braided_yarn",
   "summary": "short plain-language summary",
@@ -319,6 +441,31 @@ Return shape:
     "parameter_name": number
   }
 }`;
+
+
+export function isStandardSymmetricModePrompt(promptText = '') {
+  if (typeof promptText !== 'string') {
+    return false;
+  }
+  return /按照参考图片生成/.test(promptText) && /标准对称模式/.test(promptText);
+}
+
+export function buildModelSpecSystemPrompt(promptText = '') {
+  if (!isStandardSymmetricModePrompt(promptText)) {
+    return MODEL_SPEC_SYSTEM_PROMPT;
+  }
+
+  return `${MODEL_SPEC_SYSTEM_PROMPT}
+
+Standard symmetric mode override (strict):
+- The user requested '按照参考图片生成' and '标准对称模式'.
+- MUST output modelType = "yarn_path_collection".
+- MUST NOT output woven_path_pattern, woven_yarn_sheet, or yarn_sheet.
+- Expand every warp and every weft into explicit lines[] entries; do not return only grouped parameters.
+- Each line should include: id, name, role, groupIndex, lineIndexInGroup, type, points, color, yarnDiameter, radialSegments, pathSegments, cornerRadius (if applicable).
+- Preserve/emit per-line metadata for pattern analysis: patternMode="standard_symmetric", patternGroup, symmetryRole.
+- Return JSON only.`;
+}
 
 export function normalizeCatalogModel(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -329,6 +476,99 @@ export function normalizeCatalogModel(payload) {
   const entry = MODEL_CATALOG[modelType];
   if (!entry) {
     return null;
+  }
+
+  if (modelType === 'yarn_path_collection') {
+    const rawLines = Array.isArray(payload.lines) ? payload.lines : [];
+
+    const globalDefaults = normalizeGlobalDefaults(payload.globalDefaults);
+    const lines = rawLines
+      .map((line, index) => normalizeLineSpec(line, index, globalDefaults))
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      return null;
+    }
+
+    return {
+      modelType, // 前端用于判断渲染路径（catalog model 类型）
+      displayName: entry.displayName, // UI 展示名称
+      description: entry.description, // 模型说明文案
+      source: 'catalog', // 来源标记：来自模型推理后的标准化结果
+      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined, // LLM 给出的自然语言摘要
+      globalDefaults, // line 级参数缺省值（每条 line 仍可覆盖）
+      lines, // 真实 line-based 几何数据（前端 three.js 逐条渲染）
+    };
+  }
+
+  if (modelType === 'woven_path_pattern') {
+    const globalDefaultsRaw = payload.globalDefaults && typeof payload.globalDefaults === 'object' ? payload.globalDefaults : {};
+    const globalDefaults = {
+      yarnDiameter: clampNumber(globalDefaultsRaw.yarnDiameter, 1, 0.1, 50),
+      radialSegments: clampInteger(globalDefaultsRaw.radialSegments, 64, 12, 256),
+      pathSegments: clampInteger(globalDefaultsRaw.pathSegments, 120, 2, 512),
+      warpColor: normalizeHexColor(globalDefaultsRaw.warpColor) || '#d9ddd0',
+      weftColor: normalizeHexColor(globalDefaultsRaw.weftColor) || '#ffffff',
+      highlightColor: normalizeHexColor(globalDefaultsRaw.highlightColor) || '#f5e642',
+    };
+
+    const warpRaw = payload.warp && typeof payload.warp === 'object' ? payload.warp : {};
+    const warp = {
+      count: clampInteger(warpRaw.count, 10, 1, 128),
+      spacing: clampNumber(warpRaw.spacing, 8, 0.1, 100),
+      length: clampNumber(warpRaw.length, 130, 1, 1000),
+      tilt: clampNumber(warpRaw.tilt, 0, -180, 180),
+      start: normalizeVector3(warpRaw.start, [0, 0, 0]),
+      direction: normalizeVector3(warpRaw.direction, [0, 1, 0]),
+    };
+
+    const weftRaw = payload.weftPairs && typeof payload.weftPairs === 'object' ? payload.weftPairs : {};
+    const weftPairs = {
+      count: clampInteger(weftRaw.count, 8, 1, 128),
+      spacing: clampNumber(weftRaw.spacing, 10, 0.1, 100),
+      pairOffset: clampNumber(weftRaw.pairOffset, 3, 0, 100),
+      length: clampNumber(weftRaw.length, 150, 1, 1000),
+      shape: nonEmptyString(weftRaw.shape) || 'rounded-zigzag',
+      stepLength: clampNumber(weftRaw.stepLength, 28, 1, 300),
+      stepDrop: clampNumber(weftRaw.stepDrop, 8, 0.1, 200),
+      cornerRadius: clampNumber(weftRaw.cornerRadius, 4, 0, 200),
+    };
+
+    const crossingRaw = payload.crossing && typeof payload.crossing === 'object' ? payload.crossing : {};
+    const crossing = {
+      mode: nonEmptyString(crossingRaw.mode) || 'alternate',
+      height: clampNumber(crossingRaw.height, 2, 0, 100),
+      start: /under/i.test(nonEmptyString(crossingRaw.start)) ? 'under' : 'over',
+    };
+
+    const highlightRaw = payload.highlight && typeof payload.highlight === 'object' ? payload.highlight : {};
+    const highlight = {
+      weftIndex: clampInteger(highlightRaw.weftIndex, 0, 0, 1000),
+      pairRole: /lower/i.test(nonEmptyString(highlightRaw.pairRole)) ? 'lower' : 'upper',
+      color: normalizeHexColor(highlightRaw.color) || '#f5e642',
+    };
+
+    const transformRaw = payload.transform && typeof payload.transform === 'object' ? payload.transform : {};
+    const transform = {
+      rotationZ: clampNumber(transformRaw.rotationZ, 0, -360, 360),
+      scaleX: clampNumber(transformRaw.scaleX, 1, 0.01, 100),
+      scaleY: clampNumber(transformRaw.scaleY, 1, 0.01, 100),
+      scaleZ: clampNumber(transformRaw.scaleZ, 1, 0.01, 100),
+    };
+
+    return {
+      modelType, // 前端识别为结构化编织路径模型
+      displayName: entry.displayName, // UI 展示名称
+      description: entry.description, // 模型说明文案
+      source: 'catalog', // 来源标记：来自模型推理后的标准化结果
+      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined, // LLM 给出的结构摘要
+      globalDefaults, // 全局默认渲染参数
+      warp, // 经线结构参数（数量、间距、方向等）
+      weftPairs, // 纬线成对结构参数（rounded-zigzag 形状等）
+      crossing, // 交叉 over/under 规则
+      highlight, // 高亮线配置（索引、角色、颜色）
+      transform, // 整体变换参数（旋转/缩放）
+    };
   }
 
   const rawParameters = payload.parameters && typeof payload.parameters === 'object' ? payload.parameters : {};
@@ -344,18 +584,23 @@ export function normalizeCatalogModel(payload) {
   }));
 
   return {
-    modelType,
-    displayName: entry.displayName,
-    description: entry.description,
-    source: 'catalog',
-    summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined,
-    parameters,
+    modelType, // catalog model 类型（驱动后续代码生成）
+    displayName: entry.displayName, // UI 展示名称
+    description: entry.description, // 模型说明文案
+    source: 'catalog', // 来源标记：来自模型推理后的标准化结果
+    summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined, // LLM 对模型意图的摘要
+    parameters, // 参数化 OpenSCAD 模型参数列表
   };
 }
 
-export function fallbackCatalogModel(promptText = '') {
+export function fallbackCatalogModel(promptText = '', options = {}) {
   const prompt = promptText.toLowerCase();
+  const hasImage = Boolean(options?.hasImage);
   let modelType = 'straight_yarn_bundle';
+
+  if (hasImage) {
+    return buildFallbackYarnPathCollection();
+  }
 
   if (/(braid|plait|辫)/.test(prompt)) {
     modelType = 'braided_yarn';
@@ -398,6 +643,10 @@ export function buildOpenScadFromModelSpec(modelSpec) {
   const entry = MODEL_CATALOG[modelSpec.modelType];
   if (!entry) {
     return null;
+  }
+
+  if (modelSpec.modelType === 'yarn_path_collection' || modelSpec.modelType === 'woven_path_pattern') {
+    return entry.buildCode({}, modelSpec);
   }
 
   const params = Object.fromEntries((Array.isArray(modelSpec.parameters) ? modelSpec.parameters : []).map((parameter) => [parameter.name, Number(parameter.value)]));
@@ -444,4 +693,325 @@ function roundNumber(value) {
 
 function formatNumber(value) {
   return roundNumber(value).toString();
+}
+
+const LINE_TYPES = new Set(['straight', 'polyline', 'smoothPolyline', 'sine', 'bezier']);
+const DEFAULT_LINE_COLOR = '#d9ddd0';
+
+function normalizeGlobalDefaults(rawDefaults) {
+  const defaults = rawDefaults && typeof rawDefaults === 'object' && !Array.isArray(rawDefaults) ? rawDefaults : {};
+  const normalized = {};
+  setIfNumber(normalized, 'yarnDiameter', defaults.yarnDiameter, 0.1, 50, false);
+  setIfNumber(normalized, 'radialSegments', defaults.radialSegments, 12, 256, true);
+  setIfNumber(normalized, 'pathSegments', defaults.pathSegments, 2, 512, true);
+  normalized.color = normalizeHexColor(defaults.color) || DEFAULT_LINE_COLOR;
+  return normalized;
+}
+
+function normalizeLineSpec(rawLine, index, globalDefaults) {
+  if (!rawLine || typeof rawLine !== 'object' || Array.isArray(rawLine)) {
+    return null;
+  }
+
+  const points = normalizeLinePoints(rawLine.points);
+  if (points.length < 2) {
+    return null;
+  }
+
+  const normalizedType = normalizeLineType(rawLine.type);
+  const type = LINE_TYPES.has(normalizedType) ? normalizedType : 'smoothPolyline';
+  const normalizedLine = {
+    id: nonEmptyString(rawLine.id) || `line_${index + 1}`,
+    name: nonEmptyString(rawLine.name) || `Line ${index + 1}`,
+    type,
+    points,
+  };
+
+  setLineNumber(normalizedLine, 'yarnDiameter', rawLine.yarnDiameter, globalDefaults.yarnDiameter, 0.1, 50, false);
+  setLineNumber(normalizedLine, 'radialSegments', rawLine.radialSegments, globalDefaults.radialSegments, 12, 256, true);
+  setLineNumber(normalizedLine, 'pathSegments', rawLine.pathSegments, globalDefaults.pathSegments, 2, 512, true);
+  setLineNumber(normalizedLine, 'amplitude', rawLine.amplitude, globalDefaults.amplitude, 0, 200, false);
+  setLineNumber(normalizedLine, 'period', rawLine.period, globalDefaults.period, 0.1, 1000, false);
+  setLineNumber(normalizedLine, 'cornerRadius', rawLine.cornerRadius, globalDefaults.cornerRadius, 0, 200, false);
+
+  normalizedLine.color = normalizeHexColor(rawLine.color) || normalizeHexColor(globalDefaults.color) || DEFAULT_LINE_COLOR;
+  if (nonEmptyString(rawLine.groupId)) {
+    normalizedLine.groupId = nonEmptyString(rawLine.groupId);
+  }
+  if (nonEmptyString(rawLine.role)) {
+    normalizedLine.role = nonEmptyString(rawLine.role);
+  }
+  if (Number.isFinite(Number(rawLine.groupIndex))) {
+    normalizedLine.groupIndex = Math.max(0, Math.round(Number(rawLine.groupIndex)));
+  }
+  if (Number.isFinite(Number(rawLine.lineIndexInGroup))) {
+    normalizedLine.lineIndexInGroup = Math.max(0, Math.round(Number(rawLine.lineIndexInGroup)));
+  }
+  if (nonEmptyString(rawLine.patternMode)) {
+    normalizedLine.patternMode = nonEmptyString(rawLine.patternMode);
+  }
+  if (nonEmptyString(rawLine.patternGroup)) {
+    normalizedLine.patternGroup = nonEmptyString(rawLine.patternGroup);
+  }
+  if (nonEmptyString(rawLine.symmetryRole)) {
+    normalizedLine.symmetryRole = nonEmptyString(rawLine.symmetryRole);
+  }
+  if (nonEmptyString(rawLine.pairId)) {
+    normalizedLine.pairId = nonEmptyString(rawLine.pairId);
+  }
+  if (nonEmptyString(rawLine.pairRole)) {
+    normalizedLine.pairRole = nonEmptyString(rawLine.pairRole);
+  }
+  if (nonEmptyString(rawLine.layer)) {
+    normalizedLine.layer = nonEmptyString(rawLine.layer);
+  }
+  if (rawLine.crossingRule && typeof rawLine.crossingRule === 'object' && !Array.isArray(rawLine.crossingRule)) {
+    normalizedLine.crossingRule = {
+      mode: nonEmptyString(rawLine.crossingRule.mode) || 'alternate',
+      height: clampNumber(rawLine.crossingRule.height, 2, 0, 100),
+      start: /under/i.test(nonEmptyString(rawLine.crossingRule.start)) ? 'under' : 'over',
+    };
+  }
+  if (Number.isFinite(Number(rawLine.zOffset))) {
+    normalizedLine.zOffset = roundNumber(Number(rawLine.zOffset));
+  }
+
+  return normalizedLine;
+}
+
+function normalizeLinePoints(rawPoints) {
+  if (!Array.isArray(rawPoints)) {
+    return [];
+  }
+
+  return rawPoints
+    .map((point) => {
+      if (!Array.isArray(point)) {
+        return null;
+      }
+
+      if (point.length >= 3) {
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        const z = Number(point[2]);
+        if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+          return [roundNumber(x), roundNumber(y), roundNumber(z)];
+        }
+        return null;
+      }
+
+      if (point.length >= 2) {
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          return [roundNumber(x), roundNumber(y), 0];
+        }
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function clampNumber(value, fallback, min, max) {
+  let next = Number(value);
+  if (!Number.isFinite(next)) {
+    next = Number(fallback);
+  }
+  if (!Number.isFinite(next)) {
+    next = min;
+  }
+  return roundNumber(Math.min(max, Math.max(min, next)));
+}
+
+function clampInteger(value, fallback, min, max) {
+  return Math.round(clampNumber(value, fallback, min, max));
+}
+
+function setIfNumber(target, key, value, min, max, integer) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) {
+    return;
+  }
+  const normalized = Math.min(max, Math.max(min, next));
+  target[key] = integer ? Math.round(normalized) : roundNumber(normalized);
+}
+
+function setLineNumber(target, key, lineValue, defaultValue, min, max, integer) {
+  const next = Number.isFinite(Number(lineValue)) ? Number(lineValue) : Number(defaultValue);
+  if (!Number.isFinite(next)) {
+    return;
+  }
+  const normalized = Math.min(max, Math.max(min, next));
+  target[key] = integer ? Math.round(normalized) : roundNumber(normalized);
+}
+
+function pickString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+function normalizeLineType(value) {
+  const normalized = nonEmptyString(value).toLowerCase().replace(/[\s_-]+/g, '');
+  if (!normalized) {
+    return '';
+  }
+  if (normalized === 'smoothpolyline') {
+    return 'smoothPolyline';
+  }
+  if (normalized === 'polyline') {
+    return 'polyline';
+  }
+  if (normalized === 'straight') {
+    return 'straight';
+  }
+  if (normalized === 'sine' || normalized === 'wave' || normalized === 'wavy') {
+    return 'sine';
+  }
+  if (normalized === 'bezier') {
+    return 'bezier';
+  }
+  return '';
+}
+
+function normalizeHexColor(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed) ? trimmed : '';
+}
+
+function nonEmptyString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+function buildFallbackYarnPathCollection() {
+  return {
+    modelType: 'yarn_path_collection',
+    displayName: MODEL_CATALOG.yarn_path_collection.displayName,
+    description: MODEL_CATALOG.yarn_path_collection.description,
+    source: 'catalog_fallback',
+    summary: 'Fallback line-based yarn path model',
+    globalDefaults: {
+      yarnDiameter: 1,
+      radialSegments: 64,
+      pathSegments: 120,
+      color: DEFAULT_LINE_COLOR,
+    },
+    lines: [
+      {
+        id: 'vertical_1',
+        name: 'Vertical strand 1',
+        type: 'straight',
+        points: [[0, 0, 0], [0, 100, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 80,
+        color: DEFAULT_LINE_COLOR,
+      },
+      {
+        id: 'vertical_2',
+        name: 'Vertical strand 2',
+        type: 'straight',
+        points: [[10, 0, 0], [10, 100, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 80,
+        color: DEFAULT_LINE_COLOR,
+      },
+      {
+        id: 'horizontal_folded_1',
+        name: 'Horizontal folded strand 1',
+        type: 'smoothPolyline',
+        points: [[-20, 20, 0], [20, 20, 0], [30, 12, 0], [70, 12, 0], [80, 20, 0], [120, 20, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 120,
+        color: DEFAULT_LINE_COLOR,
+        cornerRadius: 4,
+      },
+      {
+        id: 'highlight_yellow',
+        name: 'Highlighted yellow strand',
+        type: 'smoothPolyline',
+        points: [[-20, 35, 0], [20, 35, 0], [30, 27, 0], [70, 27, 0], [80, 35, 0], [120, 35, 0]],
+        yarnDiameter: 1,
+        radialSegments: 64,
+        pathSegments: 120,
+        color: '#f5e642',
+        cornerRadius: 4,
+      },
+    ],
+  };
+}
+
+function buildFallbackWovenPathPattern() {
+  return {
+    modelType: 'woven_path_pattern',
+    displayName: MODEL_CATALOG.woven_path_pattern.displayName,
+    description: MODEL_CATALOG.woven_path_pattern.description,
+    source: 'catalog_fallback',
+    summary: 'Fallback structured woven path pattern',
+    globalDefaults: {
+      yarnDiameter: 1,
+      radialSegments: 64,
+      pathSegments: 120,
+      warpColor: '#d9ddd0',
+      weftColor: '#ffffff',
+      highlightColor: '#f5e642',
+    },
+    warp: {
+      count: 10,
+      spacing: 8,
+      length: 130,
+      tilt: -12,
+      start: [0, 0, 0],
+      direction: [0, 1, 0],
+    },
+    weftPairs: {
+      count: 8,
+      spacing: 10,
+      pairOffset: 3,
+      length: 150,
+      shape: 'rounded-zigzag',
+      stepLength: 28,
+      stepDrop: 8,
+      cornerRadius: 4,
+    },
+    crossing: {
+      mode: 'alternate',
+      height: 2,
+      start: 'over',
+    },
+    highlight: {
+      weftIndex: 4,
+      pairRole: 'upper',
+      color: '#f5e642',
+    },
+    transform: {
+      rotationZ: -18,
+      scaleX: 1,
+      scaleY: 0.85,
+      scaleZ: 1,
+    },
+  };
+}
+
+function normalizeVector3(value, fallback) {
+  if (!Array.isArray(value) || value.length < 3) {
+    return [...fallback];
+  }
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  const z = Number(value[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return [...fallback];
+  }
+  return [roundNumber(x), roundNumber(y), roundNumber(z)];
 }

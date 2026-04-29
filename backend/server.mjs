@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadLocalEnv } from './loadEnv.mjs';
 import {
-  MODEL_SPEC_SYSTEM_PROMPT,
+  buildModelSpecSystemPrompt,
+  isStandardSymmetricModePrompt,
   normalizeCatalogModel,
   fallbackCatalogModel,
   buildOpenScadFromModelSpec,
@@ -365,7 +366,7 @@ async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
       messages: [
         {
           role: 'system',
-          content: MODEL_SPEC_SYSTEM_PROMPT,
+          content: buildModelSpecSystemPrompt(prompt),
         },
         {
           role: 'user',
@@ -419,7 +420,7 @@ async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta)
     messages: [
       {
         role: 'system',
-        content: MODEL_SPEC_SYSTEM_PROMPT,
+        content: buildModelSpecSystemPrompt(prompt),
       },
       {
         role: 'user',
@@ -539,6 +540,18 @@ ${JSON.stringify(payload)}
 
 Return repaired JSON only.`;
 
+    const standardSymmetricMode = isStandardSymmetricModePrompt(prompt);
+    const finalRepairPrompt = standardSymmetricMode
+      ? `${repairPrompt}
+
+Standard symmetric mode override (strict):
+- MUST output modelType = "yarn_path_collection".
+- MUST NOT output woven_path_pattern, woven_yarn_sheet, or yarn_sheet.
+- Expand every warp and weft into explicit lines[].
+- For each line include: id, name, role, groupIndex, lineIndexInGroup, type, points, color, yarnDiameter, radialSegments, pathSegments, and cornerRadius when applicable.
+- Include patternMode="standard_symmetric", patternGroup, symmetryRole on each line where available.`
+      : repairPrompt;
+
     const data = await requestModel({
       provider,
       maxTokens: 8000,
@@ -546,11 +559,11 @@ Return repaired JSON only.`;
       messages: [
         {
           role: 'system',
-          content: MODEL_SPEC_SYSTEM_PROMPT,
+          content: buildModelSpecSystemPrompt(prompt),
         },
         {
           role: 'user',
-          content: buildUserContent(repairPrompt, imageDataUrl),
+          content: buildUserContent(finalRepairPrompt, imageDataUrl),
         },
       ],
     });

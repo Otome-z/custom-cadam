@@ -442,6 +442,31 @@ Legacy catalog model:
   }
 }`;
 
+
+export function isStandardSymmetricModePrompt(promptText = '') {
+  if (typeof promptText !== 'string') {
+    return false;
+  }
+  return /按照参考图片生成/.test(promptText) && /标准对称模式/.test(promptText);
+}
+
+export function buildModelSpecSystemPrompt(promptText = '') {
+  if (!isStandardSymmetricModePrompt(promptText)) {
+    return MODEL_SPEC_SYSTEM_PROMPT;
+  }
+
+  return `${MODEL_SPEC_SYSTEM_PROMPT}
+
+Standard symmetric mode override (strict):
+- The user requested '按照参考图片生成' and '标准对称模式'.
+- MUST output modelType = "yarn_path_collection".
+- MUST NOT output woven_path_pattern, woven_yarn_sheet, or yarn_sheet.
+- Expand every warp and every weft into explicit lines[] entries; do not return only grouped parameters.
+- Each line should include: id, name, role, groupIndex, lineIndexInGroup, type, points, color, yarnDiameter, radialSegments, pathSegments, cornerRadius (if applicable).
+- Preserve/emit per-line metadata for pattern analysis: patternMode="standard_symmetric", patternGroup, symmetryRole.
+- Return JSON only.`;
+}
+
 export function normalizeCatalogModel(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null;
@@ -572,10 +597,6 @@ export function fallbackCatalogModel(promptText = '', options = {}) {
   const prompt = promptText.toLowerCase();
   const hasImage = Boolean(options?.hasImage);
   let modelType = 'straight_yarn_bundle';
-
-  const explicitGlobalSheet = /(整片织物|整体织物|规则编织面|经纬网格|统一间距|统一周期|uniform\s+warp|uniform\s+weft|regular\s+woven\s+sheet|global\s+sheet)/i.test(promptText);
-  const lineHint = /(折线|波浪线|线条|路径|纹路|曲线|\bp0\b|\bp1\b|\bp2\b|\bp3\b|path|line|polyline|wave|route)/i.test(promptText);
-  const genericImagePrompt = /(根据图片生成模型|按图片生成|参考图片生成模型|generate from image)/i.test(promptText);
 
   if (hasImage) {
     return buildFallbackYarnPathCollection();
@@ -716,6 +737,24 @@ function normalizeLineSpec(rawLine, index, globalDefaults) {
   normalizedLine.color = normalizeHexColor(rawLine.color) || normalizeHexColor(globalDefaults.color) || DEFAULT_LINE_COLOR;
   if (nonEmptyString(rawLine.groupId)) {
     normalizedLine.groupId = nonEmptyString(rawLine.groupId);
+  }
+  if (nonEmptyString(rawLine.role)) {
+    normalizedLine.role = nonEmptyString(rawLine.role);
+  }
+  if (Number.isFinite(Number(rawLine.groupIndex))) {
+    normalizedLine.groupIndex = Math.max(0, Math.round(Number(rawLine.groupIndex)));
+  }
+  if (Number.isFinite(Number(rawLine.lineIndexInGroup))) {
+    normalizedLine.lineIndexInGroup = Math.max(0, Math.round(Number(rawLine.lineIndexInGroup)));
+  }
+  if (nonEmptyString(rawLine.patternMode)) {
+    normalizedLine.patternMode = nonEmptyString(rawLine.patternMode);
+  }
+  if (nonEmptyString(rawLine.patternGroup)) {
+    normalizedLine.patternGroup = nonEmptyString(rawLine.patternGroup);
+  }
+  if (nonEmptyString(rawLine.symmetryRole)) {
+    normalizedLine.symmetryRole = nonEmptyString(rawLine.symmetryRole);
   }
   if (nonEmptyString(rawLine.pairId)) {
     normalizedLine.pairId = nonEmptyString(rawLine.pairId);

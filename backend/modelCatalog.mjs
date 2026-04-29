@@ -321,6 +321,8 @@ Rules:
 - Do not output custom_scad.
 - If the input includes an image, first extract visible yarn centerlines / line paths.
 - If the input includes an image, ALWAYS prioritize per-line extraction and output modelType = "yarn_path_collection".
+- If the input includes an image, expand across the FULL image extent (full-frame), not a local cropped/sampled region.
+- If the input includes an image, treat text prompt as local geometry/style constraints only; text must NOT reduce the global line count implied by the full image.
 - In this woven pattern, horizontal weft strands are NOT sine waves; they are rounded-zigzag / stepped polyline paths.
 - Their local shape is: P0 ---- P1, then diagonal transition, then P2 ---- P3.
 - Use weftPairs.shape = "rounded-zigzag".
@@ -336,6 +338,8 @@ Rules:
 - For image-based generation, do not output woven_path_pattern; convert visual structures into explicit per-line yarn_path_collection lines[].
 - If ambiguous between global sheet model and multi-line path model, prefer yarn_path_collection.
 - For yarn_path_collection, each visible yarn path must be one item in lines[].
+- Do not output only a representative subset of paths; lines[] should cover the full visible set of yarns in the reference image.
+- When the image clearly shows many repeated strands, the lines[] count must scale with what is visible (not a tiny fixed set).
 - Do not merge multiple yarn paths into global parameters.
 - globalDefaults are defaults only. Each line can override yarnDiameter, radialSegments, pathSegments, color, amplitude, period, cornerRadius.
 - Choose line type per line:

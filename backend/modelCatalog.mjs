@@ -465,13 +465,13 @@ export function normalizeCatalogModel(payload) {
     }
 
     return {
-      modelType,
-      displayName: entry.displayName,
-      description: entry.description,
-      source: 'catalog',
-      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined,
-      globalDefaults,
-      lines,
+      modelType, // 前端用于判断渲染路径（catalog model 类型）
+      displayName: entry.displayName, // UI 展示名称
+      description: entry.description, // 模型说明文案
+      source: 'catalog', // 来源标记：来自模型推理后的标准化结果
+      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined, // LLM 给出的自然语言摘要
+      globalDefaults, // line 级参数缺省值（每条 line 仍可覆盖）
+      lines, // 真实 line-based 几何数据（前端 three.js 逐条渲染）
     };
   }
 
@@ -531,17 +531,17 @@ export function normalizeCatalogModel(payload) {
     };
 
     return {
-      modelType,
-      displayName: entry.displayName,
-      description: entry.description,
-      source: 'catalog',
-      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined,
-      globalDefaults,
-      warp,
-      weftPairs,
-      crossing,
-      highlight,
-      transform,
+      modelType, // 前端识别为结构化编织路径模型
+      displayName: entry.displayName, // UI 展示名称
+      description: entry.description, // 模型说明文案
+      source: 'catalog', // 来源标记：来自模型推理后的标准化结果
+      summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined, // LLM 给出的结构摘要
+      globalDefaults, // 全局默认渲染参数
+      warp, // 经线结构参数（数量、间距、方向等）
+      weftPairs, // 纬线成对结构参数（rounded-zigzag 形状等）
+      crossing, // 交叉 over/under 规则
+      highlight, // 高亮线配置（索引、角色、颜色）
+      transform, // 整体变换参数（旋转/缩放）
     };
   }
 
@@ -558,12 +558,12 @@ export function normalizeCatalogModel(payload) {
   }));
 
   return {
-    modelType,
-    displayName: entry.displayName,
-    description: entry.description,
-    source: 'catalog',
-    summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined,
-    parameters,
+    modelType, // catalog model 类型（驱动后续代码生成）
+    displayName: entry.displayName, // UI 展示名称
+    description: entry.description, // 模型说明文案
+    source: 'catalog', // 来源标记：来自模型推理后的标准化结果
+    summary: typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : undefined, // LLM 对模型意图的摘要
+    parameters, // 参数化 OpenSCAD 模型参数列表
   };
 }
 

@@ -172,7 +172,7 @@ async function requestModel (
   {
     provider,
     messages,
-    maxTokens = 8000,
+    maxTokens = 20000,
     temperature = 0.2,
   },
 ) {
@@ -213,7 +213,7 @@ async function requestModelStream (
   {
     provider,
     messages,
-    maxTokens = 8000,
+    maxTokens = 20000,
     temperature = 0.2,
     onDelta,
   },
@@ -361,7 +361,7 @@ async function inferCatalogModel (prompt, provider, imageDataUrl = '') {
 
     const data = await requestModel({
       provider,
-      maxTokens: 8000,
+      maxTokens: 20000,
       temperature: 0.1,
       messages: [
         {
@@ -415,7 +415,7 @@ async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta)
 
   await requestModelStream({
     provider,
-    maxTokens: 8000,
+    maxTokens: 20000,
     temperature: 0.1,
     messages: [
       {
@@ -554,7 +554,7 @@ Standard symmetric mode override (strict):
 
     const data = await requestModel({
       provider,
-      maxTokens: 8000,
+      maxTokens: 20000,
       temperature: 0,
       messages: [
         {

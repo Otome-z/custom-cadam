@@ -118,7 +118,52 @@ function readRequestBody (req) {
   });
 }
 
-async function generateOpenScad (prompt) {
+function buildUserContent (prompt, image) {
+  if (!image) {
+    return prompt;
+  }
+
+  return [
+    { type: 'text', text: prompt },
+    {
+      type: 'image_url',
+      image_url: {
+        url: image.dataUrl,
+      },
+    },
+  ];
+}
+
+function validateImageAttachment (image) {
+  if (!image) {
+    return null;
+  }
+
+  if (
+    typeof image !== 'object' ||
+    typeof image.name !== 'string' ||
+    typeof image.mimeType !== 'string' ||
+    typeof image.dataUrl !== 'string'
+  ) {
+    throw new Error('Invalid image payload.');
+  }
+
+  if (!image.mimeType.startsWith('image/')) {
+    throw new Error('Only image files are supported.');
+  }
+
+  if (!image.dataUrl.startsWith('data:image/')) {
+    throw new Error('Invalid image format.');
+  }
+
+  if (image.dataUrl.length > 6_000_000) {
+    throw new Error('Image is too large. Please upload a smaller image.');
+  }
+
+  return image;
+}
+
+async function generateOpenScad (prompt, image) {
   if (!OPENROUTER_API_KEY) {
     throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
   }
@@ -144,7 +189,7 @@ async function generateOpenScad (prompt) {
         },
         {
           role: 'user',
-          content: prompt,
+          content: buildUserContent(prompt, image),
         },
       ],
     }),
@@ -244,7 +289,8 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        const code = await generateOpenScad(prompt);
+        const image = validateImageAttachment(body.image);
+        const code = await generateOpenScad(prompt, image);
         sendJson(res, 200, { prompt, code });
       } catch (error) {
         console.error('Generate API failed:', error);

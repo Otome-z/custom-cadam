@@ -185,6 +185,27 @@ h2 {
   background: rgba(12, 17, 21, 0.9);
 }
 
+
+.upload-row {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: rgba(243, 243, 234, 0.82);
+}
+
+.file-input {
+  max-width: 260px;
+}
+
+.small-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+
 .actions {
   display: flex;
   gap: 12px;

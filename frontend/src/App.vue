@@ -22,6 +22,24 @@
             placeholder="例如：生成一个带把手的参数化马克杯，杯壁厚度 3mm，杯高 95mm。"
           />
 
+          <label class="upload-row">
+            <input
+              class="file-input"
+              type="file"
+              accept="image/*"
+              @change="handleImageChange"
+            />
+            <span>{{ attachedImage ? `已附加图片：${attachedImage.name}` : '可选：上传一张参考图片' }}</span>
+            <button
+              v-if="attachedImage"
+              class="ghost-button small-button"
+              type="button"
+              @click="clearImage"
+            >
+              移除
+            </button>
+          </label>
+
           <div class="actions">
             <button class="primary-button" type="submit" :disabled="isGenerating">
               {{ isGenerating ? '生成中...' : '生成模型' }}
@@ -170,7 +188,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
-import type { GenerateResponse, Parameter } from '@/types';
+import type { GenerateResponse, ImageAttachment, Parameter } from '@/types';
 
 const prompt = ref(
   '生成一个参数化马克杯，带把手，杯高 95mm，外半径 42mm，壁厚 3mm，杯底厚 4mm。',
@@ -182,6 +200,7 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
+const attachedImage = ref<ImageAttachment | null>(null);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -248,6 +267,7 @@ async function generateModel() {
       },
       body: JSON.stringify({
         prompt: trimmedPrompt,
+        image: attachedImage.value,
       }),
     });
 
@@ -276,6 +296,47 @@ async function copyCode() {
   window.setTimeout(() => {
     copied.value = false;
   }, 1500);
+}
+
+
+
+function clearImage() {
+  attachedImage.value = null;
+}
+
+async function handleImageChange(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+
+  if (!file) {
+    attachedImage.value = null;
+    return;
+  }
+
+  if (!file.type.startsWith('image/')) {
+    requestError.value = '仅支持上传图片文件。';
+    target.value = '';
+    return;
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('图片读取失败。'));
+    };
+    reader.onerror = () => reject(new Error('图片读取失败。'));
+    reader.readAsDataURL(file);
+  });
+
+  attachedImage.value = {
+    name: file.name,
+    mimeType: file.type,
+    dataUrl,
+  };
 }
 
 function updateParameterValue(

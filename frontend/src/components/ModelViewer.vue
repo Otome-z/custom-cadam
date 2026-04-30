@@ -43,6 +43,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BufferGeometry, Mesh } from 'three';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Parameter } from '@/types';
 import { createWovenTubeGroup } from '@/utils/wovenGeometry';
 
@@ -51,6 +52,7 @@ const props = defineProps<{
   code: string;
   parameters: Parameter[];
   modelSpec?: any | null;
+  pbrModelUrl?: string;
   selectedLineId?: string | null;
   loading: boolean;
   error: Error | null;
@@ -65,6 +67,7 @@ let camera: THREE.PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
 let modelGroup: THREE.Group | null = null;
+const gltfLoader = new GLTFLoader();
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
 const emit = defineEmits<{
@@ -81,7 +84,7 @@ const hasWovenCatalogTag = computed(() => props.code.includes('catalog_model: wo
 const isWovenPathPattern = computed(() => props.modelSpec?.modelType === 'woven_path_pattern');
 const isYarnPathCollection = computed(() => props.modelSpec?.modelType === 'yarn_path_collection');
 const hasRenderableModel = computed(
-  () => isWovenPathPattern.value || isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
+  () => Boolean(props.pbrModelUrl) || isWovenPathPattern.value || isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
 );
 const selectedLineSpec = computed(() => {
   if (!isYarnPathCollection.value || !Array.isArray(props.modelSpec?.lines)) {
@@ -211,6 +214,26 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     scene.remove(modelGroup);
     disposeObject3D(modelGroup);
     modelGroup = null;
+  }
+
+  if (props.pbrModelUrl) {
+    gltfLoader.load(
+      props.pbrModelUrl,
+      (gltf) => {
+        if (!scene) return;
+        modelGroup = gltf.scene;
+        scene.add(modelGroup);
+        metricText.value = {
+          native: buildStatsLabel('Native', modelGroup, 'glb'),
+        };
+        fitCameraToMesh();
+      },
+      undefined,
+      (err) => {
+        console.error('[tripo glb load failed]', err);
+      },
+    );
+    return;
   }
 
   if (isWovenPathPattern.value && props.modelSpec) {
@@ -726,7 +749,7 @@ watch(
 );
 
 watch(
-  () => [props.code, JSON.stringify(props.parameters), JSON.stringify(props.modelSpec)],
+  () => [props.code, props.pbrModelUrl, JSON.stringify(props.parameters), JSON.stringify(props.modelSpec)],
   () => {
     setGeometry(props.geometry);
   },

@@ -260,6 +260,7 @@
           :code="code"
           :parameters="parameters"
           :model-spec="modelSpec"
+          :pbr-model-url="pbrModelUrl"
           v-model:selected-line-id="selectedLineId"
           :loading="isGenerating || isCompiling"
           :error="previewError"
@@ -297,6 +298,7 @@ const prompt = ref('根据图片生成模型');
 const directScad = ref('');
 const code = ref('');
 const modelSpec = ref<any | null>(null);
+const pbrModelUrl = ref('');
 const selectedLineId = ref<string | null>(null);
 const parameters = ref<Parameter[]>([]);
 const isGenerating = ref(false);
@@ -403,6 +405,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
   thinkingText.value = '';
   thinkingStageText.value = '';
   showThinking.value = false;
+  pbrModelUrl.value = '';
 
   try {
     const shouldReuseLastResult = Boolean(options.reuseLastResult && modelSpec.value);
@@ -438,6 +441,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
     ].filter(Boolean).join('\n');
 
     code.value = resultText || JSON.stringify(payload, null, 2);
+    pbrModelUrl.value = modelUrl;
     directScad.value = code.value;
     modelSpec.value = null;
     selectedLineId.value = null;
@@ -499,6 +503,7 @@ async function generateFromDonePayloadString() {
       modelUrl ? `pbr_model_url: ${modelUrl}` : '',
       renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
     ].filter(Boolean).join('\n');
+    pbrModelUrl.value = modelUrl;
     directScad.value = code.value;
     modelSpec.value = null;
     selectedLineId.value = null;
@@ -553,6 +558,7 @@ function applyDirectScad() {
 
   requestError.value = '';
   thinkingText.value = '';
+  pbrModelUrl.value = '';
   code.value = trimmed;
   modelSpec.value = null;
   selectedLineId.value = null;

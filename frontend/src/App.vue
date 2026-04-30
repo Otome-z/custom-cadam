@@ -98,6 +98,7 @@
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
+        <p v-if="tripoStatusText" class="status">{{ tripoStatusText }}</p>
         <p v-if="!requestError && lastPrompt" class="status">最近一次请求：{{ lastPrompt }}</p>
 
         <section class="subpanel">
@@ -318,6 +319,7 @@ const selectedLineId = ref<string | null>(null);
 const parameters = ref<Parameter[]>([]);
 const isGenerating = ref(false);
 const requestError = ref('');
+const tripoStatusText = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const thinkingText = ref('');
@@ -417,6 +419,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
 
   isGenerating.value = true;
   requestError.value = '';
+  tripoStatusText.value = '';
   donePayloadError.value = '';
   copied.value = false;
   thinkingText.value = '';
@@ -457,9 +460,10 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
       renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
     ].filter(Boolean).join('\n');
 
-    code.value = resultText || JSON.stringify(payload, null, 2);
+    tripoStatusText.value = resultText || JSON.stringify(payload, null, 2);
     pbrModelUrl.value = modelUrl;
-    directScad.value = code.value;
+    code.value = '';
+    directScad.value = '';
     modelSpec.value = null;
     selectedLineId.value = null;
     lastPrompt.value = trimmedPrompt;
@@ -477,6 +481,7 @@ async function generateFromDonePayloadString() {
 
   donePayloadError.value = '';
   requestError.value = '';
+  tripoStatusText.value = '';
   const raw = donePayloadJsonInput.value.trim();
   if (!raw) {
     donePayloadError.value = '请先粘贴 donePayload 的 JSON 字符串。';
@@ -514,14 +519,15 @@ async function generateFromDonePayloadString() {
     const firstResult = payload?.result?.output?.results?.[0] ?? null;
     const modelUrl = firstResult?.pbr_model_url ?? '';
     const renderedImageUrl = firstResult?.rendered_image_url ?? '';
-    code.value = [
+    tripoStatusText.value = [
       `task_id: ${payload?.task_id ?? ''}`,
       `task_status: ${taskStatus ?? ''}`,
       modelUrl ? `pbr_model_url: ${modelUrl}` : '',
       renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
     ].filter(Boolean).join('\n');
     pbrModelUrl.value = modelUrl;
-    directScad.value = code.value;
+    code.value = '';
+    directScad.value = '';
     modelSpec.value = null;
     selectedLineId.value = null;
     lastPrompt.value = parsed.prompt;
@@ -539,6 +545,7 @@ function generateFromPbrModelUrl() {
 
   pbrModelUrlError.value = '';
   requestError.value = '';
+  tripoStatusText.value = '';
   const trimmed = pbrModelUrlInput.value.trim();
   if (!trimmed) {
     pbrModelUrlError.value = '请先粘贴 pbr_model_url。';
@@ -554,8 +561,9 @@ function generateFromPbrModelUrl() {
   selectedLineId.value = null;
   thinkingText.value = '';
   thinkingStageText.value = '';
-  code.value = `task_status: SUCCEEDED\npbr_model_url: ${trimmed}`;
-  directScad.value = code.value;
+  tripoStatusText.value = `task_status: SUCCEEDED\npbr_model_url: ${trimmed}`;
+  code.value = '';
+  directScad.value = '';
   lastPrompt.value = '通过 pbr_model_url 生成';
 }
 
@@ -601,6 +609,7 @@ function applyDirectScad() {
   }
 
   requestError.value = '';
+  tripoStatusText.value = '';
   thinkingText.value = '';
   pbrModelUrl.value = '';
   code.value = trimmed;

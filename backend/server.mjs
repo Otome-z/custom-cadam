@@ -293,21 +293,17 @@ async function requestModelStream (
   }
 }
 
-async function createTripoTask({ prompt, image, images, model = QIANWEN_MODEL, parameters = { texture_quality: 'standard' } }) {
+async function createTripoTask({ image, model = QIANWEN_MODEL, parameters = { texture_quality: 'standard' } }) {
   const apiKey = QIANWEN_API_KEY;
   if (!apiKey) {
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
-  const input = {};
-  if (typeof prompt === 'string' && prompt.trim()) input.prompt = prompt.trim();
-  if (typeof image === 'string' && image.trim()) input.image = image.trim();
-  if (Array.isArray(images) && images.length > 0) input.images = images;
-
-  const inputKeys = Object.keys(input);
-  if (inputKeys.length !== 1) {
-    throw new Error('Tripo input requires exactly one of prompt/image/images.');
+  const trimmedImage = typeof image === 'string' ? image.trim() : '';
+  if (!trimmedImage) {
+    throw new Error('Tripo image is required.');
   }
+  const input = { image: trimmedImage };
 
   const response = await fetch(QIANWEN_URL, {
     method: 'POST',
@@ -970,14 +966,14 @@ const server = http.createServer(async (req, res) => {
       try {
         const body = await readRequestBody(req);
         const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : QIANWEN_MODEL;
-        const prompt = typeof body.prompt === 'string' ? body.prompt : '';
-        const image = typeof body.image === 'string' ? body.image : '';
-        const images = Array.isArray(body.images) ? body.images.filter((item) => typeof item === 'string' && item.trim()) : undefined;
+        const image = typeof body.image === 'string'
+          ? body.image
+          : (typeof body.imageDataUrl === 'string' ? body.imageDataUrl : '');
         const parameters = body.parameters && typeof body.parameters === 'object' ? body.parameters : { texture_quality: 'standard' };
         const pollIntervalMs = Number(body.pollIntervalMs) > 0 ? Number(body.pollIntervalMs) : 15_000;
         const timeoutMs = Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : 8 * 60_000;
 
-        const created = await createTripoTask({ model, prompt, image, images, parameters });
+        const created = await createTripoTask({ model, image, parameters });
         const taskId = created?.output?.task_id;
         const result = await pollTripoTask(taskId, pollIntervalMs, timeoutMs);
 

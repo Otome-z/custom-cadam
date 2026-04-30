@@ -75,6 +75,7 @@ const emit = defineEmits<{
   'update:selectedLineId': [value: string | null];
 }>();
 const selectedLineId = ref<string | null>(null);
+const selectedGlbMeshUuid = ref<string | null>(null);
 const pointerDownPos = ref<{ x: number; y: number } | null>(null);
 const raycaster = new (THREE as any).Raycaster();
 const metricText = ref({
@@ -222,6 +223,7 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
       (gltf) => {
         if (!scene) return;
         modelGroup = gltf.scene;
+        selectedGlbMeshUuid.value = null;
         scene.add(modelGroup);
         metricText.value = {
           native: buildStatsLabel('Native', modelGroup, 'glb'),
@@ -305,7 +307,7 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerUp(event: PointerEvent) {
-  if (!isYarnPathCollection.value || !renderer || !camera || !modelGroup || !pointerDownPos.value) {
+  if (!renderer || !camera || !modelGroup || !pointerDownPos.value) {
     return;
   }
 
@@ -323,6 +325,18 @@ function onPointerUp(event: PointerEvent) {
   };
   raycaster.setFromCamera(pointer, camera);
   const intersects = raycaster.intersectObjects((modelGroup as any).children || [], true);
+
+  if (props.pbrModelUrl) {
+    const meshHit = intersects.find((item: any) => item.object?.isMesh);
+    selectedGlbMeshUuid.value = meshHit?.object?.uuid ?? null;
+    updateGlbMeshHighlight();
+    return;
+  }
+
+  if (!isYarnPathCollection.value) {
+    return;
+  }
+
   const hit = intersects.find((item: any) => item.object?.userData?.lineId);
   setSelectedLineId(hit?.object?.userData?.lineId ?? null);
 }
@@ -381,6 +395,31 @@ function updateLineHighlight() {
         }
       } else if (isSelected && material?.color?.set) {
         material.color.set('#88f0c2');
+      }
+    });
+  });
+}
+
+function updateGlbMeshHighlight() {
+  if (!modelGroup || !props.pbrModelUrl) {
+    return;
+  }
+  modelGroup.traverse((child) => {
+    const mesh = child as any;
+    if (!mesh?.isMesh || !mesh.material) {
+      return;
+    }
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const isSelected = mesh.uuid === selectedGlbMeshUuid.value;
+    materials.forEach((material: any) => {
+      if (material?.emissive?.set) {
+        if (isSelected) {
+          material.emissive.set('#ffd166');
+          material.emissiveIntensity = 0.55;
+        } else {
+          material.emissive.set('#000000');
+          material.emissiveIntensity = 0;
+        }
       }
     });
   });

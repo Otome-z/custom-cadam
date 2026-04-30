@@ -406,7 +406,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
 
   try {
     const shouldReuseLastResult = Boolean(options.reuseLastResult && modelSpec.value);
-    const response = await fetch('/api/generate-stream', {
+    const response = await fetch('/api/generate-tripo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -461,7 +461,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
 
         if (eventName === 'done') {
           const donePayload = payload as StreamDonePayload;
-          console.log('[generate-stream done]', JSON.stringify(donePayload));
+          console.log('[generate-tripo done]', JSON.stringify(donePayload));
           code.value = donePayload.code;
           modelSpec.value = donePayload.modelSpec ?? null;
           if (!Array.isArray(donePayload.modelSpec?.lines)) {
@@ -507,7 +507,7 @@ async function generateFromDonePayloadString() {
 
   isGenerating.value = true;
   try {
-    const response = await fetch('/api/generate-stream', {
+    const response = await fetch('/api/generate-tripo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -549,7 +549,7 @@ async function generateFromDonePayloadString() {
 
         if (eventName === 'done') {
           const donePayload = payload as StreamDonePayload;
-          console.log('[generate-stream done]', JSON.stringify(donePayload));
+          console.log('[generate-tripo done]', JSON.stringify(donePayload));
           code.value = donePayload.code;
           modelSpec.value = donePayload.modelSpec ?? null;
           if (!Array.isArray(donePayload.modelSpec?.lines)) {

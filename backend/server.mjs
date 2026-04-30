@@ -34,6 +34,7 @@ const QIANWEN_API_KEY =
   || '';
 const QIANWEN_MODEL = 'Tripo/Tripo-H3.1';
 const QIANWEN_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/3d-generation';
+const QIANWEN_TASK_URL = 'https://dashscope.aliyuncs.com/api/v1/tasks';
 
 
 const MIME_TYPES = {
@@ -290,6 +291,71 @@ async function requestModelStream (
       }
     }
   }
+}
+
+async function createTripoTask({ prompt, image, images, model = QIANWEN_MODEL, parameters = { texture_quality: 'standard' } }) {
+  const apiKey = QIANWEN_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
+  }
+
+  const input = {};
+  if (typeof prompt === 'string' && prompt.trim()) input.prompt = prompt.trim();
+  if (typeof image === 'string' && image.trim()) input.image = image.trim();
+  if (Array.isArray(images) && images.length > 0) input.images = images;
+
+  const inputKeys = Object.keys(input);
+  if (inputKeys.length !== 1) {
+    throw new Error('Tripo input requires exactly one of prompt/image/images.');
+  }
+
+  const response = await fetch(QIANWEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'X-DashScope-Async': 'enable',
+    },
+    body: JSON.stringify({ model, input, parameters }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(`Tripo create task failed: ${response.status} ${payload?.message || JSON.stringify(payload)}`);
+  }
+  const taskId = payload?.output?.task_id;
+  if (!taskId) {
+    throw new Error(`Tripo create task missing task_id: ${JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
+async function getTripoTask(taskId) {
+  const response = await fetch(`${QIANWEN_TASK_URL}/${taskId}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${QIANWEN_API_KEY}`,
+    },
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(`Tripo get task failed: ${response.status} ${payload?.message || JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
+async function pollTripoTask(taskId, intervalMs = 15_000, timeoutMs = 8 * 60_000) {
+  const start = Date.now();
+  let latest = null;
+  while (Date.now() - start < timeoutMs) {
+    latest = await getTripoTask(taskId);
+    const status = latest?.output?.task_status;
+    if (status === 'SUCCEEDED' || status === 'FAILED' || status === 'CANCELED' || status === 'UNKNOWN') {
+      return latest;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Tripo task poll timeout after ${Math.round(timeoutMs / 1000)}s (task_id=${taskId})`);
 }
 
 function buildUserContent(prompt, imageDataUrl) {
@@ -896,6 +962,35 @@ const server = http.createServer(async (req, res) => {
           error: error instanceof Error ? error.message : 'Unknown server error',
         });
         res.end();
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/generate-tripo' && method === 'POST') {
+      try {
+        const body = await readRequestBody(req);
+        const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : QIANWEN_MODEL;
+        const prompt = typeof body.prompt === 'string' ? body.prompt : '';
+        const image = typeof body.image === 'string' ? body.image : '';
+        const images = Array.isArray(body.images) ? body.images.filter((item) => typeof item === 'string' && item.trim()) : undefined;
+        const parameters = body.parameters && typeof body.parameters === 'object' ? body.parameters : { texture_quality: 'standard' };
+        const pollIntervalMs = Number(body.pollIntervalMs) > 0 ? Number(body.pollIntervalMs) : 15_000;
+        const timeoutMs = Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : 8 * 60_000;
+
+        const created = await createTripoTask({ model, prompt, image, images, parameters });
+        const taskId = created?.output?.task_id;
+        const result = await pollTripoTask(taskId, pollIntervalMs, timeoutMs);
+
+        sendJson(res, 200, {
+          task_id: taskId,
+          create: created,
+          result,
+        });
+      } catch (error) {
+        console.error('Generate tripo API failed:', error);
+        sendJson(res, 500, {
+          error: error instanceof Error ? error.message : 'Unknown server error',
+        });
       }
       return;
     }

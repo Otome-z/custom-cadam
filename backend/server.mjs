@@ -32,11 +32,8 @@ const QIANWEN_API_KEY =
   process.env.QIANWEN_API_KEY
   || process.env.OPENROUTER_API_KEY
   || '';
-const QIANWEN_MODEL =
-  process.env.QIANWEN_MODEL
-  || process.env.OPENROUTER_MODEL
-  || 'qwen-plus';
-const QIANWEN_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const QIANWEN_MODEL = 'Tripo/Tripo-H3.1';
+const QIANWEN_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/3d-generation';
 
 
 const MIME_TYPES = {

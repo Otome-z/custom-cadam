@@ -17,9 +17,7 @@
 2. 至少填好千问配置（DeepSeek 可选）：
 
 - `QIANWEN_API_KEY`
-- `QIANWEN_MODEL`
 - `DEEPSEEK_API_KEY`（可先留空，后续再填）
-- `DEEPSEEK_MODEL`
 
 ## 本地开发
 

@@ -177,9 +177,6 @@ async function requestModel (
   },
 ) {
   const config = resolveProviderConfig(provider);
-  const controller = new AbortController();
-  const timeoutMs = 120000;
-  const timeoutId = setTimeout(() => controller.abort(new Error(`Model request timed out after ${timeoutMs}ms`)), timeoutMs);
 
   if (!config.apiKey) {
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
@@ -189,26 +186,20 @@ async function requestModel (
     throw new Error('Missing QIANWEN_MODEL in sub-cadam/.env');
   }
 
-  let response;
-  try {
-    response = await fetch(config.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-        ...config.headers,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: maxTokens,
-        temperature,
-        messages,
-      }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const response = await fetch(config.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: maxTokens,
+      temperature,
+      messages,
+    }),
+  });
 
   if (!response.ok) {
     const errText = await response.text();
@@ -228,35 +219,26 @@ async function requestModelStream (
   },
 ) {
   const config = resolveProviderConfig(provider);
-  const controller = new AbortController();
-  const timeoutMs = 180000;
-  const timeoutId = setTimeout(() => controller.abort(new Error(`Model stream timed out after ${timeoutMs}ms`)), timeoutMs);
 
   if (!config.apiKey) {
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
-  let response;
-  try {
-    response = await fetch(config.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-        ...config.headers,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: maxTokens,
-        temperature,
-        stream: true,
-        messages,
-      }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const response = await fetch(config.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: maxTokens,
+      temperature,
+      stream: true,
+      messages,
+    }),
+  });
 
   if (!response.ok || !response.body) {
     const errText = await response.text();

@@ -43,6 +43,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BufferGeometry, Mesh } from 'three';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Parameter } from '@/types';
 import { createWovenTubeGroup } from '@/utils/wovenGeometry';
 
@@ -51,6 +52,7 @@ const props = defineProps<{
   code: string;
   parameters: Parameter[];
   modelSpec?: any | null;
+  pbrModelUrl?: string;
   selectedLineId?: string | null;
   loading: boolean;
   error: Error | null;
@@ -65,6 +67,7 @@ let camera: THREE.PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let modelMesh: Mesh | null = null;
 let modelGroup: THREE.Group | null = null;
+const gltfLoader = new GLTFLoader();
 let animationFrame = 0;
 let resizeObserver: ResizeObserver | null = null;
 const emit = defineEmits<{
@@ -72,6 +75,7 @@ const emit = defineEmits<{
   'update:selectedLineId': [value: string | null];
 }>();
 const selectedLineId = ref<string | null>(null);
+const selectedGlbMeshUuid = ref<string | null>(null);
 const pointerDownPos = ref<{ x: number; y: number } | null>(null);
 const raycaster = new (THREE as any).Raycaster();
 const metricText = ref({
@@ -81,7 +85,7 @@ const hasWovenCatalogTag = computed(() => props.code.includes('catalog_model: wo
 const isWovenPathPattern = computed(() => props.modelSpec?.modelType === 'woven_path_pattern');
 const isYarnPathCollection = computed(() => props.modelSpec?.modelType === 'yarn_path_collection');
 const hasRenderableModel = computed(
-  () => isWovenPathPattern.value || isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
+  () => Boolean(props.pbrModelUrl) || isWovenPathPattern.value || isYarnPathCollection.value || hasWovenCatalogTag.value || Boolean(props.geometry),
 );
 const selectedLineSpec = computed(() => {
   if (!isYarnPathCollection.value || !Array.isArray(props.modelSpec?.lines)) {
@@ -213,6 +217,27 @@ function setGeometry(nextGeometry: BufferGeometry | null) {
     modelGroup = null;
   }
 
+  if (props.pbrModelUrl) {
+    gltfLoader.load(
+      props.pbrModelUrl,
+      (gltf) => {
+        if (!scene) return;
+        modelGroup = gltf.scene;
+        selectedGlbMeshUuid.value = null;
+        scene.add(modelGroup);
+        metricText.value = {
+          native: buildStatsLabel('Native', modelGroup, 'glb'),
+        };
+        fitCameraToMesh();
+      },
+      undefined,
+      (err) => {
+        console.error('[tripo glb load failed]', err);
+      },
+    );
+    return;
+  }
+
   if (isWovenPathPattern.value && props.modelSpec) {
     modelGroup = createWovenPathPatternGroup(props.modelSpec);
     modelGroup.position.x = -36;
@@ -282,7 +307,7 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerUp(event: PointerEvent) {
-  if (!isYarnPathCollection.value || !renderer || !camera || !modelGroup || !pointerDownPos.value) {
+  if (!renderer || !camera || !modelGroup || !pointerDownPos.value) {
     return;
   }
 
@@ -300,6 +325,18 @@ function onPointerUp(event: PointerEvent) {
   };
   raycaster.setFromCamera(pointer, camera);
   const intersects = raycaster.intersectObjects((modelGroup as any).children || [], true);
+
+  if (props.pbrModelUrl) {
+    const meshHit = intersects.find((item: any) => item.object?.isMesh);
+    selectedGlbMeshUuid.value = meshHit?.object?.uuid ?? null;
+    updateGlbMeshHighlight();
+    return;
+  }
+
+  if (!isYarnPathCollection.value) {
+    return;
+  }
+
   const hit = intersects.find((item: any) => item.object?.userData?.lineId);
   setSelectedLineId(hit?.object?.userData?.lineId ?? null);
 }
@@ -358,6 +395,31 @@ function updateLineHighlight() {
         }
       } else if (isSelected && material?.color?.set) {
         material.color.set('#88f0c2');
+      }
+    });
+  });
+}
+
+function updateGlbMeshHighlight() {
+  if (!modelGroup || !props.pbrModelUrl) {
+    return;
+  }
+  modelGroup.traverse((child) => {
+    const mesh = child as any;
+    if (!mesh?.isMesh || !mesh.material) {
+      return;
+    }
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const isSelected = mesh.uuid === selectedGlbMeshUuid.value;
+    materials.forEach((material: any) => {
+      if (material?.emissive?.set) {
+        if (isSelected) {
+          material.emissive.set('#ffd166');
+          material.emissiveIntensity = 0.55;
+        } else {
+          material.emissive.set('#000000');
+          material.emissiveIntensity = 0;
+        }
       }
     });
   });
@@ -726,7 +788,7 @@ watch(
 );
 
 watch(
-  () => [props.code, JSON.stringify(props.parameters), JSON.stringify(props.modelSpec)],
+  () => [props.code, props.pbrModelUrl, JSON.stringify(props.parameters), JSON.stringify(props.modelSpec)],
   () => {
     setGeometry(props.geometry);
   },

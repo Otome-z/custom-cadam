@@ -80,9 +80,25 @@
             </button>
           </div>
           <p v-if="donePayloadError" class="status status-error">{{ donePayloadError }}</p>
+
+          <label class="field-label" for="pbr-model-url">通过 pbr_model_url 生成预览</label>
+          <textarea
+            id="pbr-model-url"
+            v-model="pbrModelUrlInput"
+            class="prompt-input"
+            rows="4"
+            placeholder="粘贴 Tripo 返回的 pbr_model_url"
+          />
+          <div class="actions">
+            <button class="primary-button" type="button" @click="generateFromPbrModelUrl">
+              通过 pbr_model_url 生成
+            </button>
+          </div>
+          <p v-if="pbrModelUrlError" class="status status-error">{{ pbrModelUrlError }}</p>
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
+        <p v-if="tripoStatusText" class="status">{{ tripoStatusText }}</p>
         <p v-if="!requestError && lastPrompt" class="status">最近一次请求：{{ lastPrompt }}</p>
 
         <section class="subpanel">
@@ -260,6 +276,7 @@
           :code="code"
           :parameters="parameters"
           :model-spec="modelSpec"
+          :pbr-model-url="pbrModelUrl"
           v-model:selected-line-id="selectedLineId"
           :loading="isGenerating || isCompiling"
           :error="previewError"
@@ -297,10 +314,12 @@ const prompt = ref('根据图片生成模型');
 const directScad = ref('');
 const code = ref('');
 const modelSpec = ref<any | null>(null);
+const pbrModelUrl = ref('');
 const selectedLineId = ref<string | null>(null);
 const parameters = ref<Parameter[]>([]);
 const isGenerating = ref(false);
 const requestError = ref('');
+const tripoStatusText = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const thinkingText = ref('');
@@ -310,6 +329,8 @@ const imageDataUrl = ref('');
 const uploadedImageName = ref('');
 const donePayloadJsonInput = ref('');
 const donePayloadError = ref('');
+const pbrModelUrlInput = ref('https://openapi.cdn.tripo3d.com/tcli_36586740f43d4a9a8acede8e294850c0/20260430/424dbf64-b154-4659-9dc4-15c7c610edb7/tripo_pbr_model_424dbf64-b154-4659-9dc4-15c7c610edb7.glb?auth_key=1777548316-pWhxvcZT-0-c36de122e7c240ee31c999768f4aad84');
+const pbrModelUrlError = ref('');
 const exportError = ref('');
 const isExporting = ref(false);
 const selectedExportFormat = ref<ExportFormat>('obj');
@@ -398,87 +419,54 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
 
   isGenerating.value = true;
   requestError.value = '';
+  tripoStatusText.value = '';
   donePayloadError.value = '';
   copied.value = false;
   thinkingText.value = '';
   thinkingStageText.value = '';
   showThinking.value = false;
+  pbrModelUrl.value = '';
 
   try {
     const shouldReuseLastResult = Boolean(options.reuseLastResult && modelSpec.value);
-    const response = await fetch('/api/generate-stream', {
+    const response = await fetch('/api/generate-tripo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: trimmedPrompt,
         provider: 'qianwen',
-        imageDataUrl: imageDataUrl.value || undefined,
+        imageDataUrl: 'https://ggboythlzyx.oss-cn-fuzhou.aliyuncs.com/%E7%BB%84%203.png',
         modelSpec: shouldReuseLastResult ? modelSpec.value : undefined,
         skipModelInference: shouldReuseLastResult,
       }),
     });
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       const payload = await response.json().catch(() => ({ error: '生成请求失败。' }));
       throw new Error(payload.error || '生成请求失败。');
     }
+    const payload = await response.json();
+    console.log('[generate-tripo create]', JSON.stringify(payload?.create ?? null));
+    console.log('[generate-tripo result]', JSON.stringify(payload?.result ?? null));
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    const taskStatus = payload?.result?.output?.task_status;
+    const firstResult = payload?.result?.output?.results?.[0] ?? null;
+    const modelUrl = firstResult?.pbr_model_url ?? '';
+    const renderedImageUrl = firstResult?.rendered_image_url ?? '';
+    const resultText = [
+      `task_id: ${payload?.task_id ?? ''}`,
+      `task_status: ${taskStatus ?? ''}`,
+      modelUrl ? `pbr_model_url: ${modelUrl}` : '',
+      renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
+    ].filter(Boolean).join('\n');
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop() ?? '';
-
-      for (const chunk of chunks) {
-        const eventMatch = chunk.match(/event:\s*(.+)/);
-        const dataMatch = chunk.match(/data:\s*([\s\S]+)/);
-        if (!eventMatch || !dataMatch) {
-          continue;
-        }
-
-        const eventName = eventMatch[1].trim();
-        const payload = JSON.parse(dataMatch[1]);
-
-        if (eventName === 'delta') {
-          if (payload?.type === 'thinking-stage' && typeof payload?.text === 'string') {
-            const stage = typeof payload?.stage === 'string' ? payload.stage : 'stage';
-            const localized = localizeThinkingStageEvent(stage, payload.text);
-            thinkingStageText.value += `${localized}\n`;
-          }
-          if (payload?.type === 'thinking' && typeof payload?.text === 'string') {
-            thinkingText.value += localizeThinkingStageText(payload.text);
-          }
-          continue;
-        }
-
-        if (eventName === 'done') {
-          const donePayload = payload as StreamDonePayload;
-          console.log('[generate-stream done]', JSON.stringify(donePayload));
-          code.value = donePayload.code;
-          modelSpec.value = donePayload.modelSpec ?? null;
-          if (!Array.isArray(donePayload.modelSpec?.lines)) {
-            selectedLineId.value = null;
-          }
-          lastPrompt.value = donePayload.prompt;
-          directScad.value = donePayload.code;
-          if (typeof donePayload.thinkingText === 'string') {
-            thinkingText.value = localizeThinkingStageText(donePayload.thinkingText);
-          }
-        }
-
-        if (eventName === 'error') {
-          throw new Error(payload.error || '流式生成失败。');
-        }
-      }
-    }
+    tripoStatusText.value = resultText || JSON.stringify(payload, null, 2);
+    pbrModelUrl.value = modelUrl;
+    code.value = '';
+    directScad.value = '';
+    modelSpec.value = null;
+    selectedLineId.value = null;
+    lastPrompt.value = trimmedPrompt;
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : '生成请求失败。';
   } finally {
@@ -493,6 +481,7 @@ async function generateFromDonePayloadString() {
 
   donePayloadError.value = '';
   requestError.value = '';
+  tripoStatusText.value = '';
   const raw = donePayloadJsonInput.value.trim();
   if (!raw) {
     donePayloadError.value = '请先粘贴 donePayload 的 JSON 字符串。';
@@ -507,7 +496,7 @@ async function generateFromDonePayloadString() {
 
   isGenerating.value = true;
   try {
-    const response = await fetch('/api/generate-stream', {
+    const response = await fetch('/api/generate-tripo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -518,60 +507,64 @@ async function generateFromDonePayloadString() {
       }),
     });
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       const payload = await response.json().catch(() => ({ error: '生成请求失败。' }));
       throw new Error(payload.error || '生成请求失败。');
     }
+    const payload = await response.json();
+    console.log('[generate-tripo create]', JSON.stringify(payload?.create ?? null));
+    console.log('[generate-tripo result]', JSON.stringify(payload?.result ?? null));
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop() ?? '';
-
-      for (const chunk of chunks) {
-        const eventMatch = chunk.match(/event:\s*(.+)/);
-        const dataMatch = chunk.match(/data:\s*([\s\S]+)/);
-        if (!eventMatch || !dataMatch) {
-          continue;
-        }
-
-        const eventName = eventMatch[1].trim();
-        const payload = JSON.parse(dataMatch[1]);
-
-        if (eventName === 'done') {
-          const donePayload = payload as StreamDonePayload;
-          console.log('[generate-stream done]', JSON.stringify(donePayload));
-          code.value = donePayload.code;
-          modelSpec.value = donePayload.modelSpec ?? null;
-          if (!Array.isArray(donePayload.modelSpec?.lines)) {
-            selectedLineId.value = null;
-          }
-          lastPrompt.value = donePayload.prompt;
-          directScad.value = donePayload.code;
-          if (typeof donePayload.thinkingText === 'string') {
-            thinkingText.value = donePayload.thinkingText;
-          }
-        }
-
-        if (eventName === 'error') {
-          throw new Error(payload.error || '流式生成失败。');
-        }
-      }
-    }
+    const taskStatus = payload?.result?.output?.task_status;
+    const firstResult = payload?.result?.output?.results?.[0] ?? null;
+    const modelUrl = firstResult?.pbr_model_url ?? '';
+    const renderedImageUrl = firstResult?.rendered_image_url ?? '';
+    tripoStatusText.value = [
+      `task_id: ${payload?.task_id ?? ''}`,
+      `task_status: ${taskStatus ?? ''}`,
+      modelUrl ? `pbr_model_url: ${modelUrl}` : '',
+      renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
+    ].filter(Boolean).join('\n');
+    pbrModelUrl.value = modelUrl;
+    code.value = '';
+    directScad.value = '';
+    modelSpec.value = null;
+    selectedLineId.value = null;
+    lastPrompt.value = parsed.prompt;
   } catch (error) {
     donePayloadError.value = error instanceof Error ? error.message : '通过 donePayload 生成失败。';
   } finally {
     isGenerating.value = false;
   }
+}
+
+function generateFromPbrModelUrl() {
+  if (activeMode.value !== 'direct') {
+    return;
+  }
+
+  pbrModelUrlError.value = '';
+  requestError.value = '';
+  tripoStatusText.value = '';
+  const trimmed = pbrModelUrlInput.value.trim();
+  if (!trimmed) {
+    pbrModelUrlError.value = '请先粘贴 pbr_model_url。';
+    return;
+  }
+  if (!/^https?:\/\//i.test(trimmed)) {
+    pbrModelUrlError.value = 'pbr_model_url 必须是 http/https 链接。';
+    return;
+  }
+
+  pbrModelUrl.value = trimmed;
+  modelSpec.value = null;
+  selectedLineId.value = null;
+  thinkingText.value = '';
+  thinkingStageText.value = '';
+  tripoStatusText.value = `task_status: SUCCEEDED\npbr_model_url: ${trimmed}`;
+  code.value = '';
+  directScad.value = '';
+  lastPrompt.value = '通过 pbr_model_url 生成';
 }
 
 function parseDonePayload(raw: string): { prompt: string; modelSpec: any } | null {
@@ -616,7 +609,9 @@ function applyDirectScad() {
   }
 
   requestError.value = '';
+  tripoStatusText.value = '';
   thinkingText.value = '';
+  pbrModelUrl.value = '';
   code.value = trimmed;
   modelSpec.value = null;
   selectedLineId.value = null;

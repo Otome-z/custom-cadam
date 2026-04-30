@@ -418,67 +418,30 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
       }),
     });
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       const payload = await response.json().catch(() => ({ error: '生成请求失败。' }));
       throw new Error(payload.error || '生成请求失败。');
     }
+    const payload = await response.json();
+    console.log('[generate-tripo create]', JSON.stringify(payload?.create ?? null));
+    console.log('[generate-tripo result]', JSON.stringify(payload?.result ?? null));
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    const taskStatus = payload?.result?.output?.task_status;
+    const firstResult = payload?.result?.output?.results?.[0] ?? null;
+    const modelUrl = firstResult?.pbr_model_url ?? '';
+    const renderedImageUrl = firstResult?.rendered_image_url ?? '';
+    const resultText = [
+      `task_id: ${payload?.task_id ?? ''}`,
+      `task_status: ${taskStatus ?? ''}`,
+      modelUrl ? `pbr_model_url: ${modelUrl}` : '',
+      renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
+    ].filter(Boolean).join('\n');
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop() ?? '';
-
-      for (const chunk of chunks) {
-        const eventMatch = chunk.match(/event:\s*(.+)/);
-        const dataMatch = chunk.match(/data:\s*([\s\S]+)/);
-        if (!eventMatch || !dataMatch) {
-          continue;
-        }
-
-        const eventName = eventMatch[1].trim();
-        const payload = JSON.parse(dataMatch[1]);
-
-        if (eventName === 'delta') {
-          if (payload?.type === 'thinking-stage' && typeof payload?.text === 'string') {
-            const stage = typeof payload?.stage === 'string' ? payload.stage : 'stage';
-            const localized = localizeThinkingStageEvent(stage, payload.text);
-            thinkingStageText.value += `${localized}\n`;
-          }
-          if (payload?.type === 'thinking' && typeof payload?.text === 'string') {
-            thinkingText.value += localizeThinkingStageText(payload.text);
-          }
-          continue;
-        }
-
-        if (eventName === 'done') {
-          const donePayload = payload as StreamDonePayload;
-          console.log('[generate-tripo done]', JSON.stringify(donePayload));
-          code.value = donePayload.code;
-          modelSpec.value = donePayload.modelSpec ?? null;
-          if (!Array.isArray(donePayload.modelSpec?.lines)) {
-            selectedLineId.value = null;
-          }
-          lastPrompt.value = donePayload.prompt;
-          directScad.value = donePayload.code;
-          if (typeof donePayload.thinkingText === 'string') {
-            thinkingText.value = localizeThinkingStageText(donePayload.thinkingText);
-          }
-        }
-
-        if (eventName === 'error') {
-          throw new Error(payload.error || '流式生成失败。');
-        }
-      }
-    }
+    code.value = resultText || JSON.stringify(payload, null, 2);
+    directScad.value = code.value;
+    modelSpec.value = null;
+    selectedLineId.value = null;
+    lastPrompt.value = trimmedPrompt;
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : '生成请求失败。';
   } finally {
@@ -518,55 +481,28 @@ async function generateFromDonePayloadString() {
       }),
     });
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       const payload = await response.json().catch(() => ({ error: '生成请求失败。' }));
       throw new Error(payload.error || '生成请求失败。');
     }
+    const payload = await response.json();
+    console.log('[generate-tripo create]', JSON.stringify(payload?.create ?? null));
+    console.log('[generate-tripo result]', JSON.stringify(payload?.result ?? null));
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop() ?? '';
-
-      for (const chunk of chunks) {
-        const eventMatch = chunk.match(/event:\s*(.+)/);
-        const dataMatch = chunk.match(/data:\s*([\s\S]+)/);
-        if (!eventMatch || !dataMatch) {
-          continue;
-        }
-
-        const eventName = eventMatch[1].trim();
-        const payload = JSON.parse(dataMatch[1]);
-
-        if (eventName === 'done') {
-          const donePayload = payload as StreamDonePayload;
-          console.log('[generate-tripo done]', JSON.stringify(donePayload));
-          code.value = donePayload.code;
-          modelSpec.value = donePayload.modelSpec ?? null;
-          if (!Array.isArray(donePayload.modelSpec?.lines)) {
-            selectedLineId.value = null;
-          }
-          lastPrompt.value = donePayload.prompt;
-          directScad.value = donePayload.code;
-          if (typeof donePayload.thinkingText === 'string') {
-            thinkingText.value = donePayload.thinkingText;
-          }
-        }
-
-        if (eventName === 'error') {
-          throw new Error(payload.error || '流式生成失败。');
-        }
-      }
-    }
+    const taskStatus = payload?.result?.output?.task_status;
+    const firstResult = payload?.result?.output?.results?.[0] ?? null;
+    const modelUrl = firstResult?.pbr_model_url ?? '';
+    const renderedImageUrl = firstResult?.rendered_image_url ?? '';
+    code.value = [
+      `task_id: ${payload?.task_id ?? ''}`,
+      `task_status: ${taskStatus ?? ''}`,
+      modelUrl ? `pbr_model_url: ${modelUrl}` : '',
+      renderedImageUrl ? `rendered_image_url: ${renderedImageUrl}` : '',
+    ].filter(Boolean).join('\n');
+    directScad.value = code.value;
+    modelSpec.value = null;
+    selectedLineId.value = null;
+    lastPrompt.value = parsed.prompt;
   } catch (error) {
     donePayloadError.value = error instanceof Error ? error.message : '通过 donePayload 生成失败。';
   } finally {

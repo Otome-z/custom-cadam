@@ -463,6 +463,89 @@ async function inferCatalogModelStream (prompt, provider, imageDataUrl, onDelta)
   return repaired;
 }
 
+async function inferImageAnalysisStage(prompt, provider, imageDataUrl) {
+  const data = await requestModel({
+    provider,
+    maxTokens: 12000,
+    temperature: 0.1,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a vision analysis assistant for yarn images. Return JSON only.',
+      },
+      {
+        role: 'user',
+        content: buildUserContent(`Step 1 (image-only): analyze the image only and return JSON with key "imageAnalysis".
+Rules:
+- Do NOT generate modelSpec.
+- Do NOT generate lines.
+- Focus on global structure: total visible line groups, dominant directions, repeated regions, layout blocks, and highlights.
+- Return JSON only: {"imageAnalysis": {...}}`, imageDataUrl),
+      },
+    ],
+  });
+  const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
+  const payload = extractJsonPayload(rawText);
+  return payload?.imageAnalysis && typeof payload.imageAnalysis === 'object' ? payload.imageAnalysis : null;
+}
+
+async function inferModelSpecFromImageAnalysis(prompt, provider, imageDataUrl, imageAnalysis) {
+  const data = await requestModel({
+    provider,
+    maxTokens: 20000,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: buildModelSpecSystemPrompt(prompt) },
+      {
+        role: 'user',
+        content: buildUserContent(`Step 2 (spec generation): use imageAnalysis + user text to generate modelSpec lines.
+Rules:
+- Overall count/layout/direction/repetition must be decided by imageAnalysis.
+- User text is only local shape/style rules.
+- Must output modelType="yarn_path_collection" with non-empty lines[].
+- Return JSON only.
+
+imageAnalysis:
+${JSON.stringify(imageAnalysis)}`, imageDataUrl),
+      },
+    ],
+  });
+  const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
+  const payload = extractJsonPayload(rawText);
+  return normalizeCatalogModel(payload);
+}
+
+async function validateModelCoverage(provider, prompt, imageDataUrl, imageAnalysis, modelSpec) {
+  const data = await requestModel({
+    provider,
+    maxTokens: 4000,
+    temperature: 0,
+    messages: [
+      { role: 'system', content: 'Validate whether lines[] covers image structure. Return JSON only.' },
+      {
+        role: 'user',
+        content: buildUserContent(`Step 3 (validation): check whether modelSpec.lines covers imageAnalysis.
+Return JSON only: {"pass": boolean, "reason": string}
+
+imageAnalysis:
+${JSON.stringify(imageAnalysis)}
+
+modelSpec:
+${JSON.stringify(modelSpec)}
+
+userPrompt:
+${prompt}`, imageDataUrl),
+      },
+    ],
+  });
+  const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
+  const payload = extractJsonPayload(rawText);
+  return {
+    pass: Boolean(payload?.pass),
+    reason: typeof payload?.reason === 'string' ? payload.reason : '',
+  };
+}
+
 async function generateOpenScad (prompt, provider) {
   const catalogModelSpec = await inferCatalogModel(prompt, provider);
   const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt, { hasImage: false });
@@ -486,16 +569,46 @@ async function generateOpenScad (prompt, provider) {
 }
 
 async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) {
-  const catalogModelSpec = await inferCatalogModelStream(
-    prompt,
-    provider,
-    imageDataUrl,
-    onDelta,
-  );
-  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt, { hasImage: Boolean(imageDataUrl) });
+  let catalogModelSpec;
+  if (imageDataUrl) {
+    const imageAnalysis = await inferImageAnalysisStage(prompt, provider, imageDataUrl);
+    if (!imageAnalysis) {
+      throw new Error('Step 1 failed: imageAnalysis is missing.');
+    }
+    onDelta?.({ type: 'result', text: '\n[imageAnalysis ready]\n' });
+    catalogModelSpec = await inferModelSpecFromImageAnalysis(prompt, provider, imageDataUrl, imageAnalysis);
+    const firstValidation = catalogModelSpec
+      ? await validateModelCoverage(provider, prompt, imageDataUrl, imageAnalysis, catalogModelSpec)
+      : { pass: false, reason: 'Invalid modelSpec from step 2' };
+    if (!firstValidation.pass) {
+      const repaired = await repairCatalogModelSpec({
+        prompt: `${prompt}\nValidation failure reason: ${firstValidation.reason}`,
+        provider,
+        imageDataUrl,
+        rawText: JSON.stringify(catalogModelSpec),
+        payload: catalogModelSpec,
+      });
+      if (!repaired) {
+        throw new Error(`Step 4 repair failed: ${firstValidation.reason || 'unknown reason'}`);
+      }
+      const secondValidation = await validateModelCoverage(provider, prompt, imageDataUrl, imageAnalysis, repaired);
+      if (!secondValidation.pass) {
+        throw new Error(`Step 4 failed after one repair: ${secondValidation.reason || 'coverage validation failed'}`);
+      }
+      catalogModelSpec = repaired;
+    }
+  } else {
+    catalogModelSpec = await inferCatalogModelStream(
+      prompt,
+      provider,
+      imageDataUrl,
+      onDelta,
+    );
+  }
+  const modelSpec = catalogModelSpec || fallbackCatalogModel(prompt, { hasImage: false });
   if (!catalogModelSpec) {
     console.warn('[catalog] using fallback model:', {
-      hasImage: Boolean(imageDataUrl),
+      hasImage: false,
       prompt,
       fallbackModelType: modelSpec?.modelType,
     });

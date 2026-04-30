@@ -358,6 +358,25 @@ watch(yarnLines, (lines) => {
   }
 });
 
+const STAGE_TEXT_MAP: Array<[RegExp, string]> = [
+  [/\[stage-1\]\s*image analysis started/gi, '【阶段 1/4】正在识别图片结构…'],
+  [/\[stage-1\]\s*image analysis completed/gi, '【阶段 1/4】图片结构识别完成。'],
+  [/\[stage-2\]\s*model lines generation started/gi, '【阶段 2/4】正在生成线稿（lines）…'],
+  [/\[stage-2\]\s*model lines generation completed/gi, '【阶段 2/4】线稿生成完成。'],
+  [/\[stage-3\]\s*coverage validation started/gi, '【阶段 3/4】正在校验线稿覆盖率…'],
+  [/\[stage-3\]\s*coverage validation completed/gi, '【阶段 3/4】覆盖率校验完成。'],
+  [/\[stage-4\]\s*repair started/gi, '【阶段 4/4】校验未通过，正在修复…'],
+  [/\[stage-4\]\s*repair completed and validated/gi, '【阶段 4/4】修复完成并通过复检。'],
+];
+
+function localizeThinkingStageText(rawText: string) {
+  let text = rawText;
+  for (const [pattern, localized] of STAGE_TEXT_MAP) {
+    text = text.replace(pattern, localized);
+  }
+  return text;
+}
+
 async function generateModelStream(options: { reuseLastResult?: boolean } = {}) {
   if (activeMode.value !== 'llm') {
     return;
@@ -421,7 +440,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
 
         if (eventName === 'delta') {
           if (payload?.type === 'thinking' && typeof payload?.text === 'string') {
-            thinkingText.value += payload.text;
+            thinkingText.value += localizeThinkingStageText(payload.text);
           }
           continue;
         }
@@ -437,7 +456,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
           lastPrompt.value = donePayload.prompt;
           directScad.value = donePayload.code;
           if (typeof donePayload.thinkingText === 'string') {
-            thinkingText.value = donePayload.thinkingText;
+            thinkingText.value = localizeThinkingStageText(donePayload.thinkingText);
           }
         }
 

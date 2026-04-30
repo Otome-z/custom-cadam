@@ -21,6 +21,17 @@
             rows="8"
             placeholder="例如：生成一个参数化纱线面，由 12 根圆柱形纱线并排组成，单根直径 2mm，长度 120mm，相邻间距 1mm。"
           />
+          <label class="field-label" for="image">可选参考图片</label>
+          <input
+            id="image"
+            class="parameter-input"
+            type="file"
+            accept="image/*"
+            @change="onImageSelected"
+          />
+          <p v-if="selectedImageName" class="status">
+            已选择图片：{{ selectedImageName }}
+          </p>
 
           <div class="actions">
             <button class="primary-button" type="submit" :disabled="isGenerating">
@@ -182,6 +193,8 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
+const imageDataUrl = ref('');
+const selectedImageName = ref('');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -248,6 +261,7 @@ async function generateModel() {
       },
       body: JSON.stringify({
         prompt: trimmedPrompt,
+        imageDataUrl: imageDataUrl.value || undefined,
       }),
     });
 
@@ -264,6 +278,29 @@ async function generateModel() {
   } finally {
     isGenerating.value = false;
   }
+}
+
+function onImageSelected(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+
+  if (!file) {
+    imageDataUrl.value = '';
+    selectedImageName.value = '';
+    return;
+  }
+
+  selectedImageName.value = file.name;
+  const reader = new FileReader();
+  reader.onload = () => {
+    imageDataUrl.value = typeof reader.result === 'string' ? reader.result : '';
+  };
+  reader.onerror = () => {
+    requestError.value = '图片读取失败，请重试。';
+    imageDataUrl.value = '';
+    selectedImageName.value = '';
+  };
+  reader.readAsDataURL(file);
 }
 
 async function copyCode() {

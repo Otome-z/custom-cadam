@@ -255,7 +255,26 @@ async function inferCatalogModel (prompt) {
   }
 }
 
-async function generateOpenScad (prompt) {
+function buildUserMessageContent (prompt, imageDataUrl) {
+  if (!imageDataUrl) {
+    return prompt;
+  }
+
+  return [
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageDataUrl,
+      },
+    },
+  ];
+}
+
+async function generateOpenScad (prompt, imageDataUrl = '') {
   const catalogModelSpec = await inferCatalogModel(prompt);
   if (catalogModelSpec) {
     const code = buildOpenScadFromModelSpec(catalogModelSpec);
@@ -277,7 +296,7 @@ async function generateOpenScad (prompt) {
       },
       {
         role: 'user',
-        content: prompt,
+        content: buildUserMessageContent(prompt, imageDataUrl),
       },
     ],
   });
@@ -363,13 +382,15 @@ const server = http.createServer(async (req, res) => {
         const body = await readRequestBody(req);
         const prompt =
           typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const imageDataUrl =
+          typeof body.imageDataUrl === 'string' ? body.imageDataUrl.trim() : '';
 
         if (!prompt) {
           sendJson(res, 400, { error: 'Prompt is required.' });
           return;
         }
 
-        const result = await generateOpenScad(prompt);
+        const result = await generateOpenScad(prompt, imageDataUrl);
         sendJson(res, 200, {
           prompt,
           code: result.code,

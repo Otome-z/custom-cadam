@@ -80,6 +80,21 @@
             </button>
           </div>
           <p v-if="donePayloadError" class="status status-error">{{ donePayloadError }}</p>
+
+          <label class="field-label" for="pbr-model-url">通过 pbr_model_url 生成预览</label>
+          <textarea
+            id="pbr-model-url"
+            v-model="pbrModelUrlInput"
+            class="prompt-input"
+            rows="4"
+            placeholder="粘贴 Tripo 返回的 pbr_model_url"
+          />
+          <div class="actions">
+            <button class="primary-button" type="button" @click="generateFromPbrModelUrl">
+              通过 pbr_model_url 生成
+            </button>
+          </div>
+          <p v-if="pbrModelUrlError" class="status status-error">{{ pbrModelUrlError }}</p>
         </form>
 
         <p v-if="requestError" class="status status-error">{{ requestError }}</p>
@@ -312,6 +327,8 @@ const imageDataUrl = ref('');
 const uploadedImageName = ref('');
 const donePayloadJsonInput = ref('');
 const donePayloadError = ref('');
+const pbrModelUrlInput = ref('https://openapi.cdn.tripo3d.com/tcli_36586740f43d4a9a8acede8e294850c0/20260430/424dbf64-b154-4659-9dc4-15c7c610edb7/tripo_pbr_model_424dbf64-b154-4659-9dc4-15c7c610edb7.glb?auth_key=1777548316-pWhxvcZT-0-c36de122e7c240ee31c999768f4aad84');
+const pbrModelUrlError = ref('');
 const exportError = ref('');
 const isExporting = ref(false);
 const selectedExportFormat = ref<ExportFormat>('obj');
@@ -513,6 +530,33 @@ async function generateFromDonePayloadString() {
   } finally {
     isGenerating.value = false;
   }
+}
+
+function generateFromPbrModelUrl() {
+  if (activeMode.value !== 'direct') {
+    return;
+  }
+
+  pbrModelUrlError.value = '';
+  requestError.value = '';
+  const trimmed = pbrModelUrlInput.value.trim();
+  if (!trimmed) {
+    pbrModelUrlError.value = '请先粘贴 pbr_model_url。';
+    return;
+  }
+  if (!/^https?:\/\//i.test(trimmed)) {
+    pbrModelUrlError.value = 'pbr_model_url 必须是 http/https 链接。';
+    return;
+  }
+
+  pbrModelUrl.value = trimmed;
+  modelSpec.value = null;
+  selectedLineId.value = null;
+  thinkingText.value = '';
+  thinkingStageText.value = '';
+  code.value = `task_status: SUCCEEDED\npbr_model_url: ${trimmed}`;
+  directScad.value = code.value;
+  lastPrompt.value = '通过 pbr_model_url 生成';
 }
 
 function parseDonePayload(raw: string): { prompt: string; modelSpec: any } | null {

@@ -177,6 +177,9 @@ async function requestModel (
   },
 ) {
   const config = resolveProviderConfig(provider);
+  const controller = new AbortController();
+  const timeoutMs = 120000;
+  const timeoutId = setTimeout(() => controller.abort(new Error(`Model request timed out after ${timeoutMs}ms`)), timeoutMs);
 
   if (!config.apiKey) {
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
@@ -186,20 +189,26 @@ async function requestModel (
     throw new Error('Missing QIANWEN_MODEL in sub-cadam/.env');
   }
 
-  const response = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-      ...config.headers,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: maxTokens,
-      temperature,
-      messages,
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(config.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+        ...config.headers,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: maxTokens,
+        temperature,
+        messages,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -219,26 +228,35 @@ async function requestModelStream (
   },
 ) {
   const config = resolveProviderConfig(provider);
+  const controller = new AbortController();
+  const timeoutMs = 180000;
+  const timeoutId = setTimeout(() => controller.abort(new Error(`Model stream timed out after ${timeoutMs}ms`)), timeoutMs);
 
   if (!config.apiKey) {
     throw new Error('Missing QIANWEN_API_KEY in sub-cadam/.env');
   }
 
-  const response = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-      ...config.headers,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: maxTokens,
-      temperature,
-      stream: true,
-      messages,
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(config.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+        ...config.headers,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: maxTokens,
+        temperature,
+        stream: true,
+        messages,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok || !response.body) {
     const errText = await response.text();
@@ -571,16 +589,20 @@ async function generateOpenScad (prompt, provider) {
 async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) {
   let catalogModelSpec;
   if (imageDataUrl) {
+    onDelta?.({ type: 'thinking', text: '[stage-1] image analysis started\n' });
     const imageAnalysis = await inferImageAnalysisStage(prompt, provider, imageDataUrl);
     if (!imageAnalysis) {
       throw new Error('Step 1 failed: imageAnalysis is missing.');
     }
-    onDelta?.({ type: 'result', text: '\n[imageAnalysis ready]\n' });
+    onDelta?.({ type: 'thinking', text: '[stage-1] image analysis completed\n[stage-2] model lines generation started\n' });
     catalogModelSpec = await inferModelSpecFromImageAnalysis(prompt, provider, imageDataUrl, imageAnalysis);
+    onDelta?.({ type: 'thinking', text: '[stage-2] model lines generation completed\n[stage-3] coverage validation started\n' });
     const firstValidation = catalogModelSpec
       ? await validateModelCoverage(provider, prompt, imageDataUrl, imageAnalysis, catalogModelSpec)
       : { pass: false, reason: 'Invalid modelSpec from step 2' };
+    onDelta?.({ type: 'thinking', text: '[stage-3] coverage validation completed\n' });
     if (!firstValidation.pass) {
+      onDelta?.({ type: 'thinking', text: '[stage-4] repair started\n' });
       const repaired = await repairCatalogModelSpec({
         prompt: `${prompt}\nValidation failure reason: ${firstValidation.reason}`,
         provider,
@@ -595,6 +617,7 @@ async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) 
       if (!secondValidation.pass) {
         throw new Error(`Step 4 failed after one repair: ${secondValidation.reason || 'coverage validation failed'}`);
       }
+      onDelta?.({ type: 'thinking', text: '[stage-4] repair completed and validated\n' });
       catalogModelSpec = repaired;
     }
   } else {

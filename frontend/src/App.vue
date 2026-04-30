@@ -415,7 +415,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
       body: JSON.stringify({
         prompt: trimmedPrompt,
         provider: 'qianwen',
-        imageDataUrl: imageDataUrl.value || undefined,
+        imageDataUrl: 'https://ggboythlzyx.oss-cn-fuzhou.aliyuncs.com/%E7%BB%84%203.png',
         modelSpec: shouldReuseLastResult ? modelSpec.value : undefined,
         skipModelInference: shouldReuseLastResult,
       }),

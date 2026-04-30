@@ -571,20 +571,22 @@ async function generateOpenScad (prompt, provider) {
 async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) {
   let catalogModelSpec;
   if (imageDataUrl) {
-    onDelta?.({ type: 'thinking', text: '[stage-1] image analysis started\n' });
+    onDelta?.({ type: 'thinking-stage', stage: 'stage-1', text: 'image analysis started' });
     const imageAnalysis = await inferImageAnalysisStage(prompt, provider, imageDataUrl);
     if (!imageAnalysis) {
       throw new Error('Step 1 failed: imageAnalysis is missing.');
     }
-    onDelta?.({ type: 'thinking', text: '[stage-1] image analysis completed\n[stage-2] model lines generation started\n' });
+    onDelta?.({ type: 'thinking-stage', stage: 'stage-1', text: 'image analysis completed' });
+    onDelta?.({ type: 'thinking-stage', stage: 'stage-2', text: 'model lines generation started' });
     catalogModelSpec = await inferModelSpecFromImageAnalysis(prompt, provider, imageDataUrl, imageAnalysis);
-    onDelta?.({ type: 'thinking', text: '[stage-2] model lines generation completed\n[stage-3] coverage validation started\n' });
+    onDelta?.({ type: 'thinking-stage', stage: 'stage-2', text: 'model lines generation completed' });
+    onDelta?.({ type: 'thinking-stage', stage: 'stage-3', text: 'coverage validation started' });
     const firstValidation = catalogModelSpec
       ? await validateModelCoverage(provider, prompt, imageDataUrl, imageAnalysis, catalogModelSpec)
       : { pass: false, reason: 'Invalid modelSpec from step 2' };
-    onDelta?.({ type: 'thinking', text: '[stage-3] coverage validation completed\n' });
+    onDelta?.({ type: 'thinking-stage', stage: 'stage-3', text: 'coverage validation completed' });
     if (!firstValidation.pass) {
-      onDelta?.({ type: 'thinking', text: '[stage-4] repair started\n' });
+      onDelta?.({ type: 'thinking-stage', stage: 'stage-4', text: 'repair started' });
       const repaired = await repairCatalogModelSpec({
         prompt: `${prompt}\nValidation failure reason: ${firstValidation.reason}`,
         provider,
@@ -599,7 +601,7 @@ async function generateOpenScadStream (prompt, provider, imageDataUrl, onDelta) 
       if (!secondValidation.pass) {
         throw new Error(`Step 4 failed after one repair: ${secondValidation.reason || 'coverage validation failed'}`);
       }
-      onDelta?.({ type: 'thinking', text: '[stage-4] repair completed and validated\n' });
+      onDelta?.({ type: 'thinking-stage', stage: 'stage-4', text: 'repair completed and validated' });
       catalogModelSpec = repaired;
     }
   } else {

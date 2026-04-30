@@ -110,7 +110,7 @@
           <p v-if="exportError" class="status status-error">{{ exportError }}</p>
         </section>
 
-        <section v-if="thinkingText" class="subpanel code-panel">
+        <section v-if="thinkingText || thinkingStageText" class="subpanel code-panel">
           <div class="subpanel-header">
             <h2>思考过程</h2>
             <div class="button-row">
@@ -122,6 +122,7 @@
               </button>
             </div>
           </div>
+          <pre v-if="thinkingStageText" class="code-block">{{ thinkingStageText }}</pre>
           <pre v-if="showThinking" class="code-block">{{ thinkingText }}</pre>
         </section>
 
@@ -303,6 +304,7 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const thinkingText = ref('');
+const thinkingStageText = ref('');
 const showThinking = ref(false);
 const imageDataUrl = ref('');
 const uploadedImageName = ref('');
@@ -377,6 +379,12 @@ function localizeThinkingStageText(rawText: string) {
   return text;
 }
 
+function localizeThinkingStageEvent(stage: string, text: string) {
+  return localizeThinkingStageText(`[${stage}] ${text}`)
+    .replace(`[${stage}]`, '')
+    .trim();
+}
+
 async function generateModelStream(options: { reuseLastResult?: boolean } = {}) {
   if (activeMode.value !== 'llm') {
     return;
@@ -393,6 +401,7 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
   donePayloadError.value = '';
   copied.value = false;
   thinkingText.value = '';
+  thinkingStageText.value = '';
   showThinking.value = false;
 
   try {
@@ -439,6 +448,11 @@ async function generateModelStream(options: { reuseLastResult?: boolean } = {}) 
         const payload = JSON.parse(dataMatch[1]);
 
         if (eventName === 'delta') {
+          if (payload?.type === 'thinking-stage' && typeof payload?.text === 'string') {
+            const stage = typeof payload?.stage === 'string' ? payload.stage : 'stage';
+            const localized = localizeThinkingStageEvent(stage, payload.text);
+            thinkingStageText.value += `${localized}\n`;
+          }
           if (payload?.type === 'thinking' && typeof payload?.text === 'string') {
             thinkingText.value += localizeThinkingStageText(payload.text);
           }

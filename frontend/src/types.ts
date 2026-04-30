@@ -36,6 +36,12 @@ export type Parameter = {
   options?: ParameterOption[];
 };
 
+export type ImageAttachment = {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+};
+
 export type GenerateResponse = {
   prompt: string;
   code: string;

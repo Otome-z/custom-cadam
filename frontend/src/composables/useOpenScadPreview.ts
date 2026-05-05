@@ -45,7 +45,7 @@ export function useOpenScadPreview(
       return;
     }
 
-    const blob = new Blob([data.output], { type: 'model/stl' });
+    const blob = new Blob([data.output as unknown as BlobPart], { type: 'model/stl' });
     output.value = blob;
     error.value = null;
 

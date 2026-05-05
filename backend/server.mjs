@@ -101,7 +101,7 @@ function readRequestBody (req) {
 
     req.on('data', (chunk) => {
       body += chunk;
-      if (body.length > 1_000_000) {
+      if (body.length > 10_000_000) {
         reject(new Error('Request body is too large.'));
       }
     });
@@ -118,13 +118,25 @@ function readRequestBody (req) {
   });
 }
 
-async function generateOpenScad (prompt) {
+async function generateOpenScad (prompt, image) {
   if (!OPENROUTER_API_KEY) {
     throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
   }
 
   if (!OPENROUTER_MODEL) {
     throw new Error('Missing OPENROUTER_MODEL in sub-cadam/.env');
+  }
+
+  const userContent = [];
+  userContent.push({
+    type: 'text',
+    text: prompt || 'Convert this image to OpenSCAD code.',
+  });
+  if (image) {
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: image },
+    });
   }
 
   const response = await fetch(OPENROUTER_URL, {
@@ -144,7 +156,7 @@ async function generateOpenScad (prompt) {
         },
         {
           role: 'user',
-          content: prompt,
+          content: userContent.length === 1 && userContent[0].type === 'text' ? prompt : userContent,
         },
       ],
     }),
@@ -238,13 +250,14 @@ const server = http.createServer(async (req, res) => {
         const body = await readRequestBody(req);
         const prompt =
           typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        const image = typeof body.image === 'string' ? body.image : null;
 
-        if (!prompt) {
-          sendJson(res, 400, { error: 'Prompt is required.' });
+        if (!prompt && !image) {
+          sendJson(res, 400, { error: 'Prompt or image is required.' });
           return;
         }
 
-        const code = await generateOpenScad(prompt);
+        const code = await generateOpenScad(prompt, image);
         sendJson(res, 200, { prompt, code });
       } catch (error) {
         console.error('Generate API failed:', error);

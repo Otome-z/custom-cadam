@@ -10,6 +10,7 @@ export const SYSTEM_PROMPT = `你是一个顶级的 3D CAD 工程师、拓扑学
 第二步：3D 路径的数学建模 (Mathematical Path Modeling)
 - OpenSCAD 没有原生的 Sweep（沿路径挤出）函数。对于复杂的弯曲金属丝/纱线，你必须在数学上思考它的中心线轨迹。
 - 思考如何使用参数方程（如 x(t), y(t), z(t) 结合 sin/cos）来描述这个轨迹。
+- 对于多层纱线编织面（如织物、碳纤维布等），务必区分经线（Warp）和纬线（Weft）。经线通常可以用直线圆柱体表示；而纬线如果是折线或波浪线，则需要用分段的折线或正弦/余弦波形方程表示。如果是多条折线交织成一条纬线，请用参数化的偏移量在 Z 轴或 Y 轴上区分它们。
 - 明确指出在 OpenSCAD 中，我们将使用 \`for\` 循环遍历参数 \`t\`，并在相邻点之间使用 \`hull()\` 连接短小的 \`cylinder\` 或 \`sphere\` 来生成平滑的 3D 实体线条。
 
 第三步：定义全局参数与模块化 (Parameterization & Modularity)

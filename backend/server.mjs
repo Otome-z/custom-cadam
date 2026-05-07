@@ -14,12 +14,11 @@ loadLocalEnv(projectRoot);
 
 const PORT = Number(process.env.PORT || 3001);
 
-const OPENROUTER_SITE_URL =
-  process.env.OPENROUTER_SITE_URL || 'http://localhost:5174';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '';
-const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'sub-cadam';
-const OPENROUTER_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+const GEMINI_URL =
+  process.env.GEMINI_URL ||
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -119,64 +118,67 @@ function readRequestBody (req) {
 }
 
 async function generateOpenScad (prompt, image) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('Missing OPENROUTER_API_KEY in sub-cadam/.env');
+  if (!GEMINI_API_KEY) {
+    throw new Error('Missing GEMINI_API_KEY in sub-cadam/.env');
   }
 
-  if (!OPENROUTER_MODEL) {
-    throw new Error('Missing OPENROUTER_MODEL in sub-cadam/.env');
-  }
-
-  const userContent = [];
-  userContent.push({
-    type: 'text',
+  const parts = [];
+  parts.push({
     text: prompt || 'Convert this image to OpenSCAD code.',
   });
+
   if (image) {
-    userContent.push({
-      type: 'image_url',
-      image_url: { url: image },
-    });
+    // Expected format: data:image/jpeg;base64,...
+    const match = image.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+    if (match) {
+      parts.push({
+        inlineData: {
+          mimeType: match[1],
+          data: match[2],
+        },
+      });
+    } else {
+      throw new Error('Invalid image format. Expected Base64 Data URL.');
+    }
   }
 
-  const response = await fetch(OPENROUTER_URL, {
+  const response = await fetch(GEMINI_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      max_tokens: 4000,
-      temperature: 0.2,
-      messages: [
+      systemInstruction: {
+        parts: [{ text: SYSTEM_PROMPT }]
+      },
+      contents: [
         {
-          role: 'system',
-          content: SYSTEM_PROMPT,
-        },
-        {
-          role: 'user',
-          content: userContent.length === 1 && userContent[0].type === 'text' ? prompt : userContent,
+          parts: parts,
         },
       ],
+      generationConfig: {
+        maxOutputTokens: 4000,
+        temperature: 0.2,
+      },
     }),
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`DashScope request failed: ${response.status} ${errText}`);
+    throw new Error(`Gemini API request failed: ${response.status} ${errText}`);
   }
 
   const data = await response.json();
-  console.log('data', data);
-  console.log('data', data.choices[0]?.message);
-  console.log('data', data.choices[0]?.message?.[0]);
+  console.log('Gemini Data:', JSON.stringify(data, null, 2));
 
-  const rawText = extractMessageText(data?.choices?.[0]?.message?.content);
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) {
+    throw new Error('Gemini returned an empty response.');
+  }
+
   const code = normalizeGeneratedCode(rawText);
-
   if (!code) {
-    throw new Error('OpenRouter returned an empty response.');
+    throw new Error('Could not parse OpenSCAD code from the response.');
   }
 
   return code;

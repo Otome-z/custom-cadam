@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fetch as undiciFetch, setGlobalDispatcher, EnvHttpProxyAgent } from 'undici';
 import { loadLocalEnv } from './loadEnv.mjs';
 import { SYSTEM_PROMPT } from './prompt.mjs';
 
@@ -11,6 +12,10 @@ const projectRoot = path.resolve(__dirname, '..');
 const publicDir = path.join(__dirname, 'public');
 
 loadLocalEnv(projectRoot);
+
+if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
+  setGlobalDispatcher(new EnvHttpProxyAgent());
+}
 
 const PORT = Number(process.env.PORT || 3001);
 
@@ -142,7 +147,7 @@ async function generateOpenScad (prompt, image) {
     }
   }
 
-  const response = await fetch(GEMINI_URL, {
+  const response = await undiciFetch(GEMINI_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

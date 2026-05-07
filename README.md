@@ -19,6 +19,10 @@
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 
+**注意：** 如果你所在的网络环境无法直接访问 `generativelanguage.googleapis.com`（出现 ConnectTimeoutError），请在 `.env` 中配置代理：
+- 如果你有本地代理客户端（如 Clash / V2Ray），请配置 `HTTPS_PROXY=http://127.0.0.1:7890`（端口号请根据实际情况修改）。
+- 如果你使用的是 API 代理转发商，请直接在 `.env` 中配置完整的 `GEMINI_URL`，例如 `GEMINI_URL=https://your-proxy-domain.com/v1beta/models/gemini-1.5-pro:generateContent?key=xxx`。
+
 ## 本地开发
 
 先安装依赖：

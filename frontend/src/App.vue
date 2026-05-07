@@ -191,7 +191,7 @@ import { parseParameters } from '@/utils/parseParameters';
 import type { GenerateResponse, Parameter } from '@/types';
 
 const prompt = ref(
-  '生成一个参数化马克杯，带把手，杯高 95mm，外半径 42mm，壁厚 3mm，杯底厚 4mm。',
+  '根据图片生成',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);

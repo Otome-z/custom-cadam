@@ -20,7 +20,7 @@ if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
 const PORT = Number(process.env.PORT || 3001);
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 const GEMINI_URL =
   process.env.GEMINI_URL ||
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;

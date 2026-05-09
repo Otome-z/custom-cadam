@@ -22,6 +22,24 @@
             placeholder="例如：生成一个带把手的参数化马克杯，杯壁厚度 3mm，杯高 95mm。"
           />
 
+          <div class="image-upload-wrapper">
+            <label class="field-label" for="image-upload">附带参考图片 (可选)</label>
+            <div v-if="imageUrl" class="image-preview">
+              <img :src="imageUrl" alt="Preview" class="thumbnail" />
+              <button class="ghost-button remove-image" type="button" @click="removeImage">
+                移除图片
+              </button>
+            </div>
+            <input
+              v-else
+              id="image-upload"
+              type="file"
+              accept="image/*"
+              class="image-input"
+              @change="handleImageUpload"
+            />
+          </div>
+
           <div class="actions">
             <button class="primary-button" type="submit" :disabled="isGenerating">
               {{ isGenerating ? '生成中...' : '生成模型' }}
@@ -182,6 +200,7 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
+const imageUrl = ref('');
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -231,8 +250,8 @@ watch(code, (nextCode) => {
 
 async function generateModel() {
   const trimmedPrompt = prompt.value.trim();
-  if (!trimmedPrompt) {
-    requestError.value = '请输入一段模型描述。';
+  if (!trimmedPrompt && !imageUrl.value) {
+    requestError.value = '请输入一段模型描述或上传图片。';
     return;
   }
 
@@ -248,6 +267,7 @@ async function generateModel() {
       },
       body: JSON.stringify({
         prompt: trimmedPrompt,
+        image: imageUrl.value || undefined,
       }),
     });
 
@@ -302,6 +322,26 @@ function setStringParameter(parameterName: string, event: Event) {
 function setBooleanParameter(parameterName: string, event: Event) {
   const target = event.target as HTMLInputElement;
   updateParameterValue(parameterName, target.checked);
+}
+
+function handleImageUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    if (typeof e.target?.result === 'string') {
+      imageUrl.value = e.target.result;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeImage() {
+  imageUrl.value = '';
 }
 
 onBeforeUnmount(() => {

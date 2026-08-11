@@ -19,6 +19,41 @@
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 
+默认的 `OPENSCAD_PROVIDER=gemini` 会继续使用原 Google Gemini 请求方式。
+
+如需切换到 lk888.ai 提供的 Gemini 3.1 Pro 兼容接口，请配置：
+
+```dotenv
+OPENSCAD_PROVIDER=lk-gemini
+LK_GEMINI_API_KEY=your_lk888_api_key
+LK_GEMINI_MODEL=gemini-3.1-pro-preview
+LK_GEMINI_BASE_URL=https://api.lk888.ai
+```
+
+也可以用 `LK_GEMINI_URL` 覆盖完整的 `generateContent` 地址。
+
+前端调用 `/api/generate` 时使用原生 Gemini `contents` 参数结构：
+
+```json
+{
+  "contents": [{
+    "role": "user",
+    "parts": [
+      { "text": "根据图片生成 OpenSCAD" },
+      {
+        "inlineData": {
+          "mimeType": "image/png",
+          "data": "<base64-encoded-image>"
+        }
+      }
+    ]
+  }]
+}
+```
+
+旧的 `prompt` / `image` 请求体仍兼容。lk888 Gemini 请求会绕过
+`HTTP_PROXY` / `HTTPS_PROXY` 直连，其他外部请求仍沿用原代理配置。
+
 **注意：** 如果你所在的网络环境无法直接访问 `generativelanguage.googleapis.com`（出现 ConnectTimeoutError），请在 `.env` 中配置代理：
 - 如果你有本地代理客户端（如 Clash / V2Ray），请配置 `HTTPS_PROXY=http://127.0.0.1:7890`（端口号请根据实际情况修改）。
 - 如果你使用的是 API 代理转发商，请直接在 `.env` 中配置完整的 `GEMINI_URL`，例如 `GEMINI_URL=https://your-proxy-domain.com/v1beta/models/gemini-1.5-pro:generateContent?key=xxx`。

@@ -41,3 +41,13 @@ export type GenerateResponse = {
   code: string;
 };
 
+export type GenerateRequest = {
+  contents: Array<{
+    role: 'user' | 'model';
+    parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+    >;
+  }>;
+};
+

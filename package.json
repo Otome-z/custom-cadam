@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev:backend": "node --watch backend/server.mjs",
+    "dev": "bun run --parallel dev:backend dev:frontend",
+    "dev:backend": "node backend/server.mjs",
+    "dev:backend:watch": "node --watch backend/server.mjs",
     "dev:frontend": "vite --config frontend/vite.config.mjs",
     "build": "vue-tsc -p frontend/tsconfig.json && vite build --config frontend/vite.config.mjs",
     "start": "node backend/server.mjs"
@@ -23,3 +25,4 @@
     "vue-tsc": "^2.2.10"
   }
 }
+

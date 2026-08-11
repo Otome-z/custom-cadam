@@ -23,21 +23,40 @@
           />
 
           <div class="image-upload-wrapper">
-            <label class="field-label" for="image-upload">附带参考图片 (可选)</label>
-            <div v-if="imageUrl" class="image-preview">
-              <img :src="imageUrl" alt="Preview" class="thumbnail" />
-              <button class="ghost-button remove-image" type="button" @click="removeImage">
-                移除图片
-              </button>
+            <span class="field-label">模型视图（可选，可上传多张）</span>
+            <div class="image-upload-grid">
+              <div
+                v-for="view in imageViewOptions"
+                :key="view.key"
+                class="image-upload-card"
+              >
+                <label class="image-view-label" :for="`image-upload-${view.key}`">
+                  {{ view.label }}
+                </label>
+                <div v-if="imageViews[view.key]" class="image-preview">
+                  <img
+                    :src="imageViews[view.key]"
+                    :alt="`${view.label}预览`"
+                    class="thumbnail"
+                  />
+                  <button
+                    class="ghost-button remove-image"
+                    type="button"
+                    @click="removeImage(view.key)"
+                  >
+                    移除
+                  </button>
+                </div>
+                <input
+                  v-else
+                  :id="`image-upload-${view.key}`"
+                  type="file"
+                  accept="image/*"
+                  class="image-input"
+                  @change="handleImageUpload($event, view.key)"
+                />
+              </div>
             </div>
-            <input
-              v-else
-              id="image-upload"
-              type="file"
-              accept="image/*"
-              class="image-input"
-              @change="handleImageUpload"
-            />
           </div>
 
           <div class="actions">
@@ -188,10 +207,21 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ModelViewer from '@/components/ModelViewer.vue';
 import { useOpenScadPreview } from '@/composables/useOpenScadPreview';
 import { parseParameters } from '@/utils/parseParameters';
-import type { GenerateResponse, Parameter } from '@/types';
+import type { GenerateRequest, GenerateResponse, Parameter } from '@/types';
+
+type ImageViewKey = 'reference' | 'top' | 'left' | 'right' | 'front';
+const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
+
+const imageViewOptions: Array<{ key: ImageViewKey; label: string }> = [
+  { key: 'reference', label: '参考图' },
+  { key: 'top', label: '俯视图' },
+  { key: 'left', label: '左视图' },
+  { key: 'right', label: '右视图' },
+  { key: 'front', label: '正视图' },
+];
 
 const prompt = ref(
-  '生成一个参数化马克杯，带把手，杯高 95mm，外半径 42mm，壁厚 3mm，杯底厚 4mm。',
+  '根据图片生成',
 );
 const code = ref('');
 const parameters = ref<Parameter[]>([]);
@@ -200,7 +230,17 @@ const requestError = ref('');
 const copied = ref(false);
 const lastPrompt = ref('');
 const downloadUrl = ref<string | null>(null);
-const imageUrl = ref('');
+const imageViews = ref<Record<ImageViewKey, string>>({
+  reference: '',
+  top: '',
+  left: '',
+  right: '',
+  front: '',
+});
+
+const hasImages = computed(() =>
+  imageViewOptions.some((view) => Boolean(imageViews.value[view.key])),
+);
 
 const { geometry, output, error: previewError, isCompiling } = useOpenScadPreview(
   code,
@@ -250,7 +290,7 @@ watch(code, (nextCode) => {
 
 async function generateModel() {
   const trimmedPrompt = prompt.value.trim();
-  if (!trimmedPrompt && !imageUrl.value) {
+  if (!trimmedPrompt && !hasImages.value) {
     requestError.value = '请输入一段模型描述或上传图片。';
     return;
   }
@@ -260,15 +300,36 @@ async function generateModel() {
   copied.value = false;
 
   try {
+    const parts: GenerateRequest['contents'][number]['parts'] = [{
+      text: trimmedPrompt || 'Convert this image to OpenSCAD code.',
+    }];
+    for (const view of imageViewOptions) {
+      const imageUrl = imageViews.value[view.key];
+      if (!imageUrl) {
+        continue;
+      }
+
+      const match = imageUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+      if (!match) {
+        throw new Error(`${view.label}格式无效，请重新上传。`);
+      }
+      parts.push({ text: `以下图片是模型的${view.label}：` });
+      parts.push({
+        inlineData: {
+          mimeType: match[1],
+          data: match[2],
+        },
+      });
+    }
+
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        prompt: trimmedPrompt,
-        image: imageUrl.value || undefined,
-      }),
+        contents: [{ role: 'user', parts }],
+      } satisfies GenerateRequest),
     });
 
     const payload = (await response.json()) as GenerateResponse & { error?: string };
@@ -324,24 +385,30 @@ function setBooleanParameter(parameterName: string, event: Event) {
   updateParameterValue(parameterName, target.checked);
 }
 
-function handleImageUpload(event: Event) {
+function handleImageUpload(event: Event, viewKey: ImageViewKey) {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) {
     return;
   }
 
+  if (file.size > MAX_IMAGE_SIZE) {
+    requestError.value = `${imageViewOptions.find((view) => view.key === viewKey)?.label || '图片'}不能超过 8 MB。`;
+    target.value = '';
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = (e) => {
     if (typeof e.target?.result === 'string') {
-      imageUrl.value = e.target.result;
+      imageViews.value[viewKey] = e.target.result;
     }
   };
   reader.readAsDataURL(file);
 }
 
-function removeImage() {
-  imageUrl.value = '';
+function removeImage(viewKey: ImageViewKey) {
+  imageViews.value[viewKey] = '';
 }
 
 onBeforeUnmount(() => {
